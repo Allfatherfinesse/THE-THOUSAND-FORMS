@@ -7,4 +7,7 @@ Saved/
 .vscode/
 *.sln
 *.suo
+Builds/
+__pycache__/
+*.pyc
 # Do not ignore Content: authored assets belong in source control.

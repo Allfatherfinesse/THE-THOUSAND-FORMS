@@ -1,0 +1,21 @@
+name: Combat core
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Strict C++17 tests
+        run: bash Tests/run_combat_tests.sh
+      - name: Address and undefined behavior checks
+        run: SANITIZE=1 bash Tests/run_combat_tests.sh
+      - name: Python syntax and diff whitespace
+        run: |
+          python3 -m py_compile Scripts/ue.py Scripts/bootstrap_arena.py
+          git diff --check
