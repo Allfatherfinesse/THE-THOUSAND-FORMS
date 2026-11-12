@@ -1,0 +1,10 @@
+# Unreal Engine generated files
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.vscode/
+*.sln
+*.suo
+# Do not ignore Content: authored assets belong in source control.
