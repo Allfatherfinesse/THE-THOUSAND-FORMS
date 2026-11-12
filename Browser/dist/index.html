@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#141715">
+  <meta name="description" content="Enter the Ashen Courtyard. A playable martial arts combat experiment from THE THOUSAND FORMS.">
+  <title>The Thousand Forms — The Ashen Courtyard</title>
+  <link rel="icon" type="image/svg+xml" href="./seal.svg">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="game-shell" aria-label="The Thousand Forms combat arena">
+    <canvas id="arena" aria-label="Three-dimensional training courtyard. Use WASD to move, J to attack, F to guard, and Space to evade." tabindex="0"></canvas>
+    <div class="scene-vignette" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="The Thousand Forms home">
+        <svg class="seal" viewBox="0 0 44 44" fill="none" aria-hidden="true">
+          <path d="M22 2 39.3 12v20L22 42 4.7 32V12L22 2Z" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M22 8v28M11 16h22M11 28h22M16 12v20M28 12v20M9 22h26" stroke="currentColor" stroke-width="1.2"/>
+          <path d="m16 16 12 12m0-12L16 28" stroke="currentColor" stroke-width="1"/>
+        </svg>
+        <span>THE THOUSAND<br><strong>FORMS</strong></span>
+      </a>
+      <div class="utility-controls">
+        <span class="experiment-badge"><i aria-hidden="true"></i> Browser combat experiment</span>
+        <button class="icon-button" id="sound-toggle" type="button" aria-label="Mute sound" aria-pressed="true" title="Toggle sound">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path class="sound-muted" d="m16 9 5 6m0-6-5 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <button class="icon-button play-only" id="pause-toggle" type="button" aria-label="Pause game" title="Pause · Escape">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 6v12M16 6v12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <section class="combat-hud player-panel" aria-label="Player status">
+      <div class="panel-heading"><span class="eyebrow">THE SEEKER</span><span class="small-label">YOU</span></div>
+      <div class="meter-label"><span>Vitality</span><span id="health-value">100</span></div>
+      <div class="meter-track health-track" aria-label="Player health"><span id="player-health" class="meter-fill health-fill" style="width:100%"></span></div>
+      <div class="secondary-meters">
+        <div class="meter-group"><div class="meter-label"><span>Stamina</span><span id="stamina-value">100</span></div><div class="meter-track"><span id="player-stamina" class="meter-fill stamina-fill" style="width:100%"></span></div></div>
+        <div class="meter-group"><div class="meter-label"><span>Posture</span></div><div class="meter-track"><span id="player-posture" class="meter-fill posture-fill" style="width:0%"></span></div></div>
+      </div>
+    </section>
+
+    <section class="combat-hud enemy-panel" aria-label="Opponent status">
+      <span class="eyebrow">YOUR OPPONENT</span>
+      <h2 id="enemy-name">The Courtyard Keeper</h2>
+      <div class="meter-track enemy-health-track" aria-label="Opponent health"><span id="enemy-health" class="meter-fill enemy-fill" style="width:100%"></span></div>
+      <div class="meter-track enemy-posture-track" aria-label="Opponent posture"><span id="enemy-posture" class="meter-fill posture-fill" style="width:0%"></span></div>
+      <p id="enemy-intent">Watch. Learn. Respond.</p>
+    </section>
+
+    <div id="combat-message" class="combat-message" role="status" aria-live="polite" aria-atomic="true"></div>
+
+    <section class="combat-hud style-panel" aria-label="Choose fighting style">
+      <div class="panel-heading"><span class="eyebrow">YOUR FORM</span><span class="small-label desktop-only"><kbd>Q</kbd> CYCLE</span></div>
+      <div class="style-options">
+        <button type="button" class="style-option" data-style="0" aria-pressed="true"><span class="style-number">I</span><span class="style-name">Muay Thai</span><kbd>1</kbd></button>
+        <button type="button" class="style-option" data-style="1" aria-pressed="false"><span class="style-number">II</span><span class="style-name">Wing Chun</span><kbd>2</kbd></button>
+        <button type="button" class="style-option" data-style="2" aria-pressed="false"><span class="style-number">III</span><span class="style-name">Taekwondo</span><kbd>3</kbd></button>
+      </div>
+      <p id="style-description">Close the distance. Break their posture.</p>
+    </section>
+
+    <aside class="combat-hud action-legend desktop-only" aria-label="Combat controls">
+      <div><span>Light strike</span><kbd>J / LMB</kbd></div>
+      <div><span>Heavy strike</span><kbd>K / RMB</kbd></div>
+      <div><span>Guard / deflect</span><kbd>F</kbd></div>
+      <div><span>Evade</span><kbd>SPACE</kbd></div>
+      <div><span>Hybrid technique</span><kbd>E</kbd></div>
+      <div><span>Focus / free aim</span><kbd>TAB</kbd></div>
+      <div><span>Pause</span><kbd>ESC / P</kbd></div>
+      <p>Move <b>WASD / ARROWS</b><span> · </span>Reset <b>R</b></p>
+    </aside>
+
+    <section id="start-overlay" class="start-overlay" aria-labelledby="game-title">
+      <div class="start-content">
+        <div class="location-label"><span class="label-rule" aria-hidden="true"></span><span>THE ASHEN COURTYARD</span><span class="location-number">01</span></div>
+        <h1 id="game-title"><span>THE</span>THOUSAND<br><em>FORMS</em></h1>
+        <p class="start-tagline">A thousand paths.<br>One worthy opponent.</p>
+        <p class="start-description">Find your distance. Read the opening.<br>Make every movement matter.</p>
+        <fieldset class="encounter-picker">
+          <legend>CHOOSE YOUR ENCOUNTER</legend>
+          <div class="encounter-options">
+            <button type="button" data-mode="sparring" aria-pressed="true"><span class="choice-mark" aria-hidden="true"></span><span><strong>Sparring</strong><small>Find your rhythm</small></span></button>
+            <button type="button" data-mode="boss" aria-pressed="false"><span class="choice-mark" aria-hidden="true"></span><span><strong>The Master</strong><small>Test your resolve</small></span></button>
+          </div>
+        </fieldset>
+        <button class="primary-button" type="button" data-start><span>Enter the courtyard</span><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <p class="start-controls desktop-only"><span><kbd>WASD / ARROWS</kbd> Move</span><span><kbd>J / K</kbd> Strike</span><span><kbd>F</kbd> Guard</span><span><kbd>SPACE</kbd> Evade</span><span><kbd>1 / 2 / 3</kbd> Style</span><span><kbd>TAB</kbd> Focus / free aim</span><span><kbd>ESC / P</kbd> Pause</span></p>
+        <p class="start-controls mobile-only">Touch controls appear when you enter.</p>
+      </div>
+      <div class="courtyard-caption" aria-hidden="true"><span class="caption-line"></span><p>A QUIET PLACE<br>TO BECOME DANGEROUS.</p><span class="caption-coordinates">FORM / INTENT / DISCIPLINE</span></div>
+      <footer class="start-footer"><span>THREE DISCIPLINES. ONE COURTYARD.</span><span>AN EARLY COMBAT EXPERIMENT <i aria-hidden="true">/</i> PLAYABLE IN YOUR BROWSER</span></footer>
+    </section>
+
+    <section id="result-overlay" class="modal-overlay" aria-labelledby="result-title" hidden>
+      <div class="result-card">
+        <div class="small-seal" aria-hidden="true">千</div>
+        <span class="eyebrow">THE COURTYARD REMEMBERS</span>
+        <h2 id="result-title">A lesson earned.</h2>
+        <p id="result-detail">Every encounter leaves you changed.</p>
+        <button class="primary-button" type="button" data-restart><span>Enter again</span><span aria-hidden="true">↗</span></button>
+        <button class="text-button" type="button" data-return>Return to the courtyard gate</button>
+      </div>
+    </section>
+
+    <section id="pause-overlay" class="modal-overlay" aria-labelledby="pause-title" hidden>
+      <div class="result-card pause-card">
+        <span class="eyebrow">A MOMENT OF STILLNESS</span>
+        <h2 id="pause-title">Find your breath.</h2>
+        <p>The courtyard can wait.</p>
+        <button class="primary-button" type="button" data-resume><span>Return to the fight</span><span aria-hidden="true">↗</span></button>
+        <button class="text-button" type="button" data-return>Return to the courtyard gate</button>
+      </div>
+    </section>
+
+    <div class="touch-controls combat-hud mobile-only" aria-label="Touch combat controls">
+      <div id="joystick" class="joystick" role="group" aria-label="Movement joystick"><div class="joystick-ring" aria-hidden="true"></div><div id="joystick-nub" class="joystick-nub" aria-hidden="true"></div><span>MOVE</span></div>
+      <div class="touch-actions">
+        <button type="button" class="touch-action touch-hybrid" data-action="hybrid" aria-label="Hybrid technique">Hybrid</button>
+        <button type="button" class="touch-action touch-heavy" data-action="heavy" aria-label="Heavy strike">Heavy</button>
+        <button type="button" class="touch-action touch-guard" data-guard aria-label="Hold to guard">Guard</button>
+        <button type="button" class="touch-action touch-light" data-action="light" aria-label="Light strike">Strike</button>
+        <button type="button" class="touch-action touch-evade" data-action="evade" aria-label="Evade">Evade</button>
+      </div>
+    </div>
+    <div class="grain" aria-hidden="true"></div>
+  </main>
+  <script defer src="./game.bundle.js"></script>
+</body>
+</html>
