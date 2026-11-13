@@ -13,6 +13,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+html, body { overscroll-behavior: none; }
 body { background: var(--ink); color: var(--paper); font-family: Arial, Helvetica, sans-serif; -webkit-font-smoothing: antialiased; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { font: inherit; color: inherit; cursor: pointer; }
@@ -22,11 +23,13 @@ button:disabled { opacity: .4; cursor: default; }
 button svg { flex-shrink: 0; }
 kbd { font-family: Arial, Helvetica, sans-serif; font-size: 10px; line-height: 1.6; letter-spacing: .06em; font-weight: 400; }
 .game-shell { position: relative; width: 100%; height: 100%; height: 100dvh; isolation: isolate; }
+.game-shell:fullscreen { width: 100vw; height: 100dvh; background: var(--ink); }
+.game-shell:-webkit-full-screen { width: 100vw; height: 100dvh; background: var(--ink); }
 #arena { position: absolute; inset: 0; display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
 .scene-vignette { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(9, 15, 12, .38), transparent 26%, transparent 65%, rgba(9, 15, 12, .54)); z-index: 1; }
 .grain { position: absolute; inset: 0; pointer-events: none; z-index: 30; opacity: .035; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.78' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23n)' opacity='.9' d='M0 0h160v160H0z'/%3E%3C/svg%3E"); }
 
-.topbar { position: absolute; top: 26px; left: 32px; right: 32px; display: flex; justify-content: space-between; align-items: center; gap: 20px; z-index: 20; pointer-events: none; }
+.topbar { position: absolute; top: max(26px, env(safe-area-inset-top)); left: max(32px, env(safe-area-inset-left)); right: max(32px, env(safe-area-inset-right)); display: flex; justify-content: space-between; align-items: center; gap: 20px; z-index: 40; pointer-events: none; }
 .brand { display: inline-flex; align-items: center; gap: 13px; color: var(--paper); text-decoration: none; pointer-events: auto; }
 .brand .seal { width: 35px; height: 40px; color: var(--copper); }
 .brand span { font-size: 10px; letter-spacing: .21em; line-height: 1.65; }
@@ -37,6 +40,7 @@ kbd { font-family: Arial, Helvetica, sans-serif; font-size: 10px; line-height: 1
 .icon-button { display: grid; place-items: center; width: 36px; height: 36px; background: rgba(14, 22, 16, .34); border: 1px solid var(--line); border-radius: 50%; transition: background .2s, border-color .2s; }
 .icon-button:hover { background: rgba(192, 154, 105, .15); border-color: var(--copper); }
 .icon-button svg { width: 17px; height: 17px; }
+#fullscreen-toggle[aria-pressed="true"] { background: rgba(192, 154, 105, .2); border-color: var(--copper); }
 .sound-waves { display: none; }
 #sound-toggle[aria-pressed="true"] .sound-waves { display: block; }
 #sound-toggle[aria-pressed="true"] .sound-muted { display: none; }
@@ -107,6 +111,7 @@ body.is-playing .combat-hud { opacity: 1; visibility: visible; }
 .combat-message { position: absolute; left: 50%; top: 28%; transform: translateX(-50%); z-index: 8; font-family: Georgia, 'Times New Roman', serif; font-size: 27px; color: var(--paper); text-shadow: 0 2px 18px #0b120b, 0 1px 5px #0b120b; letter-spacing: .03em; pointer-events: none; text-align: center; max-width: calc(100% - 50px); opacity: 0; transition: opacity .2s; }
 .combat-message.visible { opacity: 1; }
 .combat-message:empty { display: none; }
+.combat-message.app-notice { z-index: 45; padding: 12px 18px; background: rgba(10, 18, 13, .94); font: 14px/1.6 Arial, sans-serif; border: 1px solid var(--copper); }
 .style-panel { left: 32px; bottom: 31px; width: 365px; padding: 17px 15px 0; background: linear-gradient(0deg, rgba(12, 21, 14, .4), transparent); border-top: 1px solid var(--line); }
 .style-panel .panel-heading { margin-bottom: 14px; }
 .style-panel kbd { font-size: 8px; }
@@ -291,6 +296,27 @@ body.is-playing .combat-hud { opacity: 1; visibility: visible; }
   .small-seal { display: none; }
   .result-card h2 { font-size: 30px; margin: 13px 0; }
   .result-card > p { margin-bottom: 18px; }
+}
+
+/* Keep the enter button inside short app panels and phone landscape viewports. */
+@media (max-height: 500px) and (min-width: 600px) {
+  .start-content { width: min(510px, 64vw); padding-top: 74px; padding-bottom: 22px; }
+  .location-label { margin-bottom: 12px; }
+  h1 { font-size: 36px; margin-bottom: 10px; }
+  h1 > span { margin-bottom: 7px; font-size: 7px; }
+  .start-tagline { display: none; }
+  .start-description, .start-footer, .courtyard-caption { display: none; }
+  .encounter-picker { margin-top: 16px; margin-bottom: 12px; }
+  .encounter-picker legend { margin-bottom: 6px; }
+  .encounter-options button { min-height: 42px; padding: 8px; }
+  .primary-button { min-height: 43px; padding: 11px 16px; }
+}
+
+@media (max-width: 800px), (pointer: coarse) {
+  .icon-button { min-width: 40px; min-height: 40px; }
+  .topbar { left: max(18px, env(safe-area-inset-left)); right: max(18px, env(safe-area-inset-right)); }
+  .touch-actions { right: max(12px, env(safe-area-inset-right)); }
+  .joystick { left: max(18px, env(safe-area-inset-left)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

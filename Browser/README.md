@@ -6,6 +6,19 @@ This is a separate browser implementation; it does not certify the Unreal projec
 
 ## Play
 
+The private hosted game is at https://thousand-forms-ashen-courtyard.ezcookings.chatgpt.site.
+The currently published build is the original browser version (saved version 1).
+The newer explicit full-screen button and input-lifecycle changes in this source
+checkout have not been uploaded: the Sites credential service currently rejects
+this client with `sites_git_client_upgrade_required`.
+
+In this source build, use the expand button at the top right for full-screen play.
+Escape exits full screen and pauses. Changes of viewport/focus release held
+controls; full-screen requests denied by an embedded browser show a fallback
+message without stopping the game. The app manifest supports standalone launch
+on platforms that offer Add to Home Screen. Physical-device installation has not
+been verified.
+
 Open `dist/index.html` in a current WebGL 2 browser. Its checked-in bundle runs
 offline, including the scene and synthesized audio. No engine, account or server
 is required for the downloaded copy. If your browser restricts local files, run
@@ -59,6 +72,7 @@ The optional browser test uses Playwright:
 ```sh
 # Install Playwright separately if it is not already available.
 GAME_URL=http://127.0.0.1:4173 node tests/browser-smoke.mjs
+GAME_URL=http://127.0.0.1:4173 node tests/fullscreen.test.mjs
 ```
 
 `PLAYWRIGHT_MODULE` may name an existing installation and `BROWSER_PATH` may select

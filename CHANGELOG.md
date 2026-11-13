@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-13 — Private app and full-screen source update
+
+- Published the previously tested saved game as a private Sites app, following the
+  user's request to play it like HIGH WATER. See `docs/APP_PUBLICATION.md`.
+- Prepared an explicit full-screen button, standalone app manifest/icons, and
+  input/focus/resize/pointer cleanup. Escape exits full screen and pauses; a denied
+  fullscreen request leaves play available.
+- New source upload is blocked by `sites_git_client_upgrade_required`. The live
+  app remains saved version 1; the additional full-screen changes are not live.
+
 ## 2026-11-12 — Browser combat experiment
 
 - Started actual combat, world/animation and interface subagent tasks; integrated

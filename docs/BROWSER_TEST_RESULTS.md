@@ -1,5 +1,32 @@
 # Browser prototype: validation evidence
 
+## Full-screen app update — 2026-11-13
+
+The newer app source passed all **19 combat tests** and **11 Chromium browser
+checks**, with no browser errors. Run the additional regression suite with:
+
+```sh
+PLAYWRIGHT_MODULE=/opt/codex/cua_node/lib/node_modules/playwright/index.mjs BROWSER_PATH=/usr/bin/chromium node tests/fullscreen.test.mjs
+```
+
+The checks cover real Fullscreen API entry/exit, canvas resizing and focus,
+clearing held movement/guard, preserving pause through transitions, Escape to
+exit and pause, keyboard activation of toolbar controls, rejected-request
+fallback, portrait/landscape control bounds and taps, multi-touch ownership,
+pointer cancellation, and lost capture. Touch tests use Chromium device
+emulation; physical phones, installation, and other browser engines remain
+unverified. The denied-request test deliberately simulates API rejection.
+
+QA found a missing exported full-screen toggle, which was fixed before the final
+passing run. Test synchronization and multi-touch event data were corrected to
+match browser event behavior. The tested self-contained bundle includes that fix.
+
+The live app currently serves the previously saved version. These full-screen
+changes are prepared in source but are not yet hosted because Sites source
+credentials are unavailable for this client. See [app publication](APP_PUBLICATION.md).
+
+## Initial browser prototype — 2026-11-12
+
 Date: 2026-11-12. Work: `codex/browser-combat-prototype`.
 Node v24.19.0; Chromium using software WebGL/SwiftShader in the cloud environment.
 

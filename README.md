@@ -5,6 +5,12 @@ A mythological dark-fantasy combat project. Read [AGENTS.md](AGENTS.md),
 
 ## Play the browser experiment
 
+**[Play the private app](https://thousand-forms-ashen-courtyard.ezcookings.chatgpt.site)**
+
+The hosted game is live. The additional in-game full-screen controls in this
+checkout are not hosted yet because Sites source uploads are unavailable in this
+client. See the [publication receipt](docs/APP_PUBLICATION.md).
+
 [The Ashen Courtyard](Browser/README.md) is a playable 3D browser prototype with
 three provisional styles, a sparring partner and a two-phase boss. It includes
 attacks, deflect/guard, evade, stamina/posture, hybrid moves, touch controls,

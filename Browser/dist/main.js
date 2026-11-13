@@ -1,6 +1,7 @@
 import { Game, STYLES } from './combat.js';
 import { createRenderer } from './renderer.js';
 import { createAudio } from './audio.js';
+import { createAppShell } from './app-shell.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('arena');
@@ -21,10 +22,12 @@ let started = false, paused = false, selectedMode = 'sparring', selectedStyle = 
 let muted = false, locked = true, lastFrame = performance.now(), elapsed = 0;
 let pointer = null, messageUntil = 0, resultShown = false, hitstop = 0;
 let lastStyle = -1, lastIntent = '', joystickPointer = null;
+let touchGuard = null;
 const keys = new Set(), joystick = { x: 0, z: 0 };
 const stats = { hits: 0, deflects: 0, start: 0 };
 
 function showMessage(text, seconds = 1.4) {
+  $('combat-message').classList.remove('app-notice');
   $('combat-message').textContent = text;
   $('combat-message').classList.add('visible');
   messageUntil = elapsed + seconds;
@@ -33,9 +36,33 @@ function showMessage(text, seconds = 1.4) {
 function resetInput() {
   keys.clear(); joystick.x = 0; joystick.z = 0;
   game.setGuard(false);
+  game.player.buffer = null;
+  pointer = null;
+  const movePointer = joystickPointer, guard = touchGuard;
+  joystickPointer = null; touchGuard = null;
+  const stick = $('joystick');
+  if (movePointer !== null && stick?.hasPointerCapture(movePointer)) stick.releasePointerCapture(movePointer);
+  if (guard?.element.hasPointerCapture(guard.id)) guard.element.releasePointerCapture(guard.id);
   if ($('joystick-nub')) $('joystick-nub').style.transform = 'translate(-50%, -50%)';
-  joystickPointer = null;
 }
+
+const appShell = createAppShell({
+  root: document.querySelector('.game-shell'), button: $('fullscreen-toggle'),
+  onReset: resetInput,
+  onChange({ exited }) {
+    lastFrame = performance.now();
+    renderer?.resize();
+    if (exited) pauseGame(true);
+    else if (started && !paused && game.result === 'playing') canvas.focus({ preventScroll: true });
+  },
+  onNotice(text, seconds) { showMessage(text, seconds); $('combat-message').classList.add('app-notice'); },
+});
+
+// Host-panel expansion, browser chrome changes and rotation may resize the canvas
+// without changing the outer window. Never keep a stale pointer anchor or held key.
+const resizeGame = () => { resetInput(); lastFrame = performance.now(); renderer?.resize(); };
+const resizeObserver = new ResizeObserver(resizeGame);
+resizeObserver.observe(document.querySelector('.game-shell'));
 
 function startGame(mode = selectedMode) {
   if (!renderer) return;
@@ -103,15 +130,16 @@ document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click'
 document.querySelectorAll('[data-style]').forEach(b => b.addEventListener('click', () => {
   const style = Number(b.dataset.style);
   if (!started) { selectedStyle = style; game.player.style = style; lastStyle = -1; updateHud(); }
-  else act('style', style);
+  else { act('style', style); if (!paused) canvas.focus({ preventScroll: true }); }
 }));
 $('pause-toggle').addEventListener('click', () => pauseGame());
-$('sound-toggle').addEventListener('click', () => {
+$('sound-toggle').addEventListener('click', event => {
   muted = !muted; sound.setEnabled(!muted); if (!muted) sound.unlock();
   $('sound-toggle').setAttribute('aria-pressed', String(!muted));
   $('sound-toggle').setAttribute('aria-label', muted ? 'Enable sound' : 'Mute sound');
   $('sound-toggle').classList.toggle('muted', muted);
   showMessage(muted ? 'SOUND OFF' : 'SOUND ON', .8);
+  if (event.detail > 0 && started && !paused) canvas.focus({ preventScroll: true });
 });
 $('help-toggle')?.addEventListener('click', () => {
   if (started && !paused) pauseGame(true);
@@ -121,8 +149,16 @@ $('help-toggle')?.addEventListener('click', () => {
 
 window.addEventListener('keydown', (event) => {
   if (!started) return;
-  if (event.code === 'Escape' || event.code === 'KeyP') { event.preventDefault(); if (!event.repeat) pauseGame(); return; }
+  if (event.code === 'Escape' || event.code === 'KeyP') {
+    event.preventDefault();
+    if (!event.repeat) {
+      if (event.code === 'Escape' && appShell.active()) { pauseGame(true); appShell.toggle(); }
+      else pauseGame();
+    }
+    return;
+  }
   if (paused || game.result !== 'playing') return;
+  if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, [contenteditable="true"]')) return;
   const recognized = ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowLeft','ArrowDown','ArrowRight','Space','KeyF','KeyJ','KeyK','KeyQ','KeyE','KeyR','Digit1','Digit2','Digit3','Tab'];
   if (!recognized.includes(event.code)) return;
   event.preventDefault(); keys.add(event.code);
@@ -136,9 +172,9 @@ window.addEventListener('keydown', (event) => {
 });
 window.addEventListener('keyup', event => {
   keys.delete(event.code);
-  if (event.code === 'KeyF') game.setGuard(false);
+  if (event.code === 'KeyF') game.setGuard(touchGuard !== null);
 });
-window.addEventListener('blur', () => { if (started && !paused) pauseGame(true); resetInput(); });
+window.addEventListener('blur', () => { if (started && !paused && !appShell.busy) pauseGame(true); resetInput(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && started) pauseGame(true); });
 canvas.addEventListener('contextmenu', event => event.preventDefault());
 canvas.addEventListener('pointermove', event => { pointer = renderer?.projectPointer(event.clientX, event.clientY); });
@@ -154,10 +190,17 @@ document.querySelectorAll('[data-action]').forEach(b => {
 });
 document.querySelectorAll('[data-guard]').forEach(b => {
   b.addEventListener('pointerdown', event => {
-    event.preventDefault(); b.setPointerCapture(event.pointerId);
-    if (started && !paused) game.setGuard(true);
+    event.preventDefault();
+    if (!started || paused || touchGuard !== null || game.result !== 'playing') return;
+    touchGuard = { id: event.pointerId, element: b };
+    b.setPointerCapture(event.pointerId);
+    game.setGuard(true);
   });
-  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(name, () => game.setGuard(false));
+  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(name, event => {
+    if (touchGuard?.id !== event.pointerId) return;
+    touchGuard = null;
+    game.setGuard(keys.has('KeyF'));
+  });
 });
 const joystickElement = $('joystick');
 function moveJoystick(event) {
@@ -169,10 +212,13 @@ function moveJoystick(event) {
   $('joystick-nub').style.transform = `translate(calc(-50% + ${x * box.width * .25}px), calc(-50% + ${z * box.height * .25}px))`;
 }
 joystickElement?.addEventListener('pointerdown', event => {
-  event.preventDefault(); joystickPointer = event.pointerId; joystickElement.setPointerCapture(event.pointerId); moveJoystick(event);
+  event.preventDefault();
+  if (!started || paused || joystickPointer !== null || game.result !== 'playing') return;
+  joystickPointer = event.pointerId; joystickElement.setPointerCapture(event.pointerId); moveJoystick(event);
 });
 joystickElement?.addEventListener('pointermove', event => { if (event.pointerId === joystickPointer) moveJoystick(event); });
-for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) joystickElement?.addEventListener(name, () => {
+for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) joystickElement?.addEventListener(name, event => {
+  if (joystickPointer !== event.pointerId) return;
   joystick.x = joystick.z = 0; joystickPointer = null; $('joystick-nub').style.transform = 'translate(-50%, -50%)';
 });
 
@@ -245,13 +291,19 @@ function frame(now) {
   renderer?.render(game, paused ? 0 : dt, elapsed);
   requestAnimationFrame(frame);
 }
-window.addEventListener('resize', () => renderer?.resize());
+window.addEventListener('resize', resizeGame);
+window.visualViewport?.addEventListener('resize', resizeGame);
+canvas.addEventListener('webglcontextlost', event => {
+  event.preventDefault(); pauseGame(true);
+  showMessage('Graphics paused. Reload the game to reconnect.', 30);
+});
 document.querySelector('.brand')?.addEventListener('click', event => { event.preventDefault(); returnToMenu(); });
 updateHud();
 requestAnimationFrame(frame);
 
 // Read-only QA snapshot: tests observe the same model used by the live game.
 Object.defineProperty(window, '__THOUSAND_FORMS__', { value: {
-  snapshot: () => ({ started, paused, mode: game.mode, result: game.result, phase: game.phase,
+  snapshot: () => ({ started, paused, fullscreen: appShell.active(), keys: [...keys], joystick: { ...joystick },
+    joystickPointer, touchGuard: touchGuard?.id ?? null, mode: game.mode, result: game.result, phase: game.phase,
     player: { ...game.player }, enemy: { ...game.enemy }, time: game.time }),
 }, writable: false });
