@@ -1,0 +1,3 @@
+# esbuild preserves whitespace inside Three.js GLSL template strings.
+Browser/dist/game.bundle.js linguist-generated=true -whitespace
+Browser/dist/vendor/* linguist-vendored=true
