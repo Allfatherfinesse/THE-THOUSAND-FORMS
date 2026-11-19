@@ -30,6 +30,10 @@
       </a>
       <div class="utility-controls">
         <span class="experiment-badge"><i aria-hidden="true"></i> Browser combat experiment</span>
+        <span id="camera-help" hidden>Free camera · Drag to look</span>
+        <button class="icon-button play-only" id="lock-toggle" type="button" aria-label="Release opponent lock" aria-pressed="true" title="Opponent locked · Tab">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
         <button class="icon-button" id="fullscreen-toggle" type="button" aria-label="Enter full screen" aria-pressed="false" title="Enter full screen">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -74,11 +78,12 @@
 
     <aside class="combat-hud action-legend desktop-only" aria-label="Combat controls">
       <div><span>Light strike</span><kbd>J / LMB</kbd></div>
-      <div><span>Heavy strike</span><kbd>K / RMB</kbd></div>
+      <div><span>Heavy strike</span><kbd>K / RMB LOCKED</kbd></div>
       <div><span>Guard / deflect</span><kbd>F</kbd></div>
       <div><span>Evade</span><kbd>SPACE</kbd></div>
       <div><span>Hybrid technique</span><kbd>E</kbd></div>
-      <div><span>Focus / free aim</span><kbd>TAB</kbd></div>
+      <div><span>Lock on / free camera</span><kbd>TAB</kbd></div>
+      <div><span>Look around (unlocked)</span><kbd>RMB DRAG</kbd></div>
       <div><span>Pause</span><kbd>ESC / P</kbd></div>
       <p>Move <b>WASD / ARROWS</b><span> · </span>Reset <b>R</b></p>
     </aside>
@@ -97,8 +102,8 @@
           </div>
         </fieldset>
         <button class="primary-button" type="button" data-start><span>Enter the courtyard</span><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <p class="start-controls desktop-only"><span><kbd>WASD / ARROWS</kbd> Move</span><span><kbd>J / K</kbd> Strike</span><span><kbd>F</kbd> Guard</span><span><kbd>SPACE</kbd> Evade</span><span><kbd>1 / 2 / 3</kbd> Style</span><span><kbd>TAB</kbd> Focus / free aim</span><span><kbd>ESC / P</kbd> Pause</span></p>
-        <p class="start-controls mobile-only">Touch controls appear when you enter.</p>
+        <p class="start-controls desktop-only"><span><kbd>WASD / ARROWS</kbd> Move</span><span><kbd>J / K</kbd> Strike</span><span><kbd>F</kbd> Guard</span><span><kbd>SPACE</kbd> Evade</span><span><kbd>1 / 2 / 3</kbd> Style</span><span><kbd>TAB</kbd> Lock on</span><span><kbd>RMB DRAG</kbd> Look when unlocked</span><span><kbd>ESC / P</kbd> Pause</span></p>
+        <p class="start-controls mobile-only">Use the target button to unlock the camera, then drag the scene to look. Touch combat controls appear when you enter.</p>
       </div>
       <div class="courtyard-caption" aria-hidden="true"><span class="caption-line"></span><p>A QUIET PLACE<br>TO BECOME DANGEROUS.</p><span class="caption-coordinates">FORM / INTENT / DISCIPLINE</span></div>
       <footer class="start-footer"><span>THREE DISCIPLINES. ONE COURTYARD.</span><span>AN EARLY COMBAT EXPERIMENT <i aria-hidden="true">/</i> PLAYABLE IN YOUR BROWSER</span></footer>

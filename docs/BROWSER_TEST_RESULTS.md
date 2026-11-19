@@ -1,5 +1,21 @@
 # Browser prototype: validation evidence
 
+## Third-person camera — 2026-11-19
+
+The published bundle passed all 19 combat rule tests. `tests/third-person.test.mjs`
+passed 9 Chromium checks covering lock-on, camera-relative strafing and evasion,
+free orbit, touch cancellation, rotation and fullscreen. Screenshots and head/foot
+projection checks confirmed full-body framing at spawn on desktop and two phone
+orientations. `tests/fullscreen.test.mjs` passed all 11 fullscreen checks during
+integration. Both browser suites recorded zero browser exceptions or failed requests.
+
+Widening the shoulder offset initially pushed the player's chest off screen near
+some pillars. When the camera arm retracts, it now turns toward both fighters.
+`tests/camera-perimeter.test.mjs` checks the chest of each fighter against the
+view bounds at 24 arena-edge positions in both portrait and landscape. All 48
+placements passed. Phone input and rotation were tested with Chromium emulation.
+Run the suites against `npm start` using the commands in `Browser/README.md`.
+
 ## Full-screen app update — 2026-11-13
 
 The newer app source passed all **19 combat tests** and **11 Chromium browser
@@ -21,9 +37,7 @@ QA found a missing exported full-screen toggle, which was fixed before the final
 passing run. Test synchronization and multi-touch event data were corrected to
 match browser event behavior. The tested self-contained bundle includes that fix.
 
-The live app currently serves the previously saved version. These full-screen
-changes are prepared in source but are not yet hosted because Sites source
-credentials are unavailable for this client. See [app publication](APP_PUBLICATION.md).
+These changes shipped with the third-person camera update on 2026-11-19.
 
 ## Initial browser prototype — 2026-11-12
 

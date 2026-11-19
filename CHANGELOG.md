@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-19 — Third-person combat camera
+
+- Published shoulder-view combat, opponent lock and free orbit in the existing private app. The update also delivers the previously prepared fullscreen controls.
+- Movement and directional evasion follow the camera. The camera pulls forward at arena pillars and keeps both fighters framed.
+
 ## 2026-11-13 — Private app and full-screen source update
 
 - Published the previously tested saved game as a private Sites app, following the

@@ -41,6 +41,9 @@ kbd { font-family: Arial, Helvetica, sans-serif; font-size: 10px; line-height: 1
 .icon-button:hover { background: rgba(192, 154, 105, .15); border-color: var(--copper); }
 .icon-button svg { width: 17px; height: 17px; }
 #fullscreen-toggle[aria-pressed="true"] { background: rgba(192, 154, 105, .2); border-color: var(--copper); }
+#camera-help { position: absolute; right: 0; top: calc(100% + 4px); padding: 3px 7px; font-size: 12px; background: rgba(12, 20, 16, .85); pointer-events: none; }
+body:not(.is-playing) #camera-help, body.is-paused #camera-help { display: none; }
+#lock-toggle[aria-pressed="true"] { color: var(--copper); border-color: var(--copper); }
 .sound-waves { display: none; }
 #sound-toggle[aria-pressed="true"] .sound-waves { display: block; }
 #sound-toggle[aria-pressed="true"] .sound-muted { display: none; }

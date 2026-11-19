@@ -17,13 +17,24 @@ export function createRenderer(canvas) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0b121a);
   scene.fog = new THREE.FogExp2(0x0b121a, 0.019);
-  const camera = new THREE.OrthographicCamera(-16, 16, 11, -11, .1, 110);
-  camera.position.set(12, 16, 14);
-  camera.lookAt(0, .25, 0);
-  const raycaster = new THREE.Raycaster();
-  const pointer = new THREE.Vector2();
-  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  const groundPoint = new THREE.Vector3();
+  const camera = new THREE.PerspectiveCamera(58, 1, .08, 110);
+  const cameraTarget = new THREE.Vector3(0, 1.15, 2.25);
+  const framedTarget = cameraTarget.clone();
+  const nearView = new THREE.Vector3();
+  const enemyView = new THREE.Vector3();
+  const followAnchor = new THREE.Vector3(0, 1.1, 3);
+  const desiredCameraPosition = new THREE.Vector3();
+  const desiredCameraTarget = new THREE.Vector3();
+  const actualAnchor = new THREE.Vector3();
+  const viewDirection = new THREE.Vector3();
+  const collisionDirection = new THREE.Vector3();
+  const collisionPoint = new THREE.Vector3();
+  const collisionRay = new THREE.Ray();
+  const cameraObstacles = [];
+  let cameraYaw = Math.PI, freeYaw = Math.PI, cameraPitch = .34, freePitch = .34;
+  let cameraReady = false, cameraLocked = true, cameraObstructed = false;
+  camera.position.set(.65, 2.9, 8.1);
+  camera.lookAt(cameraTarget);
   const geometryCache = new Map();
   const ownedMaterials = new Set();
   const staticInstances = [];
@@ -268,6 +279,14 @@ export function createRenderer(canvas) {
   const staticBatches = new Map();
   scene.traverse(item => {
     if (!item.isMesh || animatedFlames.has(item)) return;
+    // Retain conservative collision volumes before meshes become instances.
+    // Floor decoration and distant scenery are not camera obstructions.
+    item.geometry.computeBoundingBox();
+    const bounds = item.geometry.boundingBox.clone().applyMatrix4(item.matrixWorld);
+    const center = bounds.getCenter(new THREE.Vector3());
+    if (bounds.max.y > .65 && bounds.min.y < 7 && Math.hypot(center.x, center.z) < 16) {
+      cameraObstacles.push(bounds.expandByScalar(.24));
+    }
     const key = `${item.geometry.uuid}:${item.material.uuid}:${item.castShadow}:${item.receiveShadow}`;
     if (!staticBatches.has(key)) staticBatches.set(key, []);
     staticBatches.get(key).push(item);
@@ -590,31 +609,160 @@ export function createRenderer(canvas) {
     updateTelegraph(rig, f, enemy);
   }
 
+  function resetCamera(game) {
+    const player = game?.player;
+    if (!player) return;
+    const enemy = game.enemy;
+    const dx = enemy ? enemy.x - player.x : 0;
+    const dz = enemy ? enemy.z - player.z : 0;
+    cameraYaw = freeYaw = Math.hypot(dx, dz) > .1 ? Math.atan2(dx, dz) : (player.yaw ?? Math.PI);
+    cameraPitch = freePitch = .34;
+    cameraLocked = true;
+    cameraReady = true;
+    followAnchor.set(player.x, 1.1, player.z);
+    updateCamera(game, 0, true, true);
+  }
+
+  function orbit(dx, dy) {
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
+    freeYaw -= dx * .004;
+    freeYaw = Math.atan2(Math.sin(freeYaw), Math.cos(freeYaw));
+    freePitch = clamp(freePitch + dy * .003, -.08, .62);
+  }
+
+  function resolveCameraObstruction(origin) {
+    collisionDirection.subVectors(camera.position, origin);
+    const desiredDistance = collisionDirection.length();
+    if (desiredDistance < .001) return;
+    collisionDirection.multiplyScalar(1 / desiredDistance);
+    collisionRay.set(origin, collisionDirection);
+    let safeDistance = desiredDistance;
+    for (const bounds of cameraObstacles) {
+      if (!collisionRay.intersectBox(bounds, collisionPoint)) continue;
+      const distance = collisionPoint.distanceTo(origin);
+      if (distance < safeDistance) safeDistance = Math.max(.12, distance - .035);
+    }
+    cameraObstructed = safeDistance < desiredDistance - .001;
+    if (cameraObstructed) camera.position.copy(origin).addScaledVector(collisionDirection, safeDistance);
+    camera.position.y = Math.max(.38, camera.position.y);
+  }
+
+  function updateCamera(game, dt, locked, snap = false) {
+    const player = game.player;
+    if (!player) return;
+    if (!cameraReady) { resetCamera(game); return; }
+    const enemy = game.enemy;
+    cameraLocked = !!locked && !!enemy;
+    const lookBlend = snap ? 1 : 1 - Math.exp(-dt * 9);
+    const followBlend = snap ? 1 : 1 - Math.exp(-dt * 14);
+    const positionBlend = snap ? 1 : 1 - Math.exp(-dt * 12);
+    actualAnchor.set(player.x, 1.1, player.z);
+    followAnchor.lerp(actualAnchor, followBlend);
+    let desiredYaw = freeYaw;
+    let desiredPitch = freePitch;
+    let enemyDistance = 0;
+    if (cameraLocked) {
+      const dx = enemy.x - player.x, dz = enemy.z - player.z;
+      enemyDistance = Math.hypot(dx, dz);
+      // Avoid an abrupt half-turn if the fighters briefly overlap during evasion.
+      desiredYaw = enemyDistance > .65 ? Math.atan2(dx, dz) : cameraYaw;
+      desiredPitch = .34;
+    }
+    const yawDifference = Math.atan2(Math.sin(desiredYaw - cameraYaw), Math.cos(desiredYaw - cameraYaw));
+    cameraYaw += yawDifference * lookBlend;
+    cameraYaw = Math.atan2(Math.sin(cameraYaw), Math.cos(cameraYaw));
+    cameraPitch += (desiredPitch - cameraPitch) * lookBlend;
+    if (cameraLocked) { freeYaw = cameraYaw; freePitch = cameraPitch; }
+    const forwardX = Math.sin(cameraYaw), forwardZ = Math.cos(cameraYaw);
+    const rightX = -forwardZ, rightZ = forwardX;
+    const portrait = camera.aspect < .85;
+    const boom = portrait ? 5.1 : 4.6;
+    // As the fighters close, move to the side so the opponent's hands remain visible.
+    const closeRange = cameraLocked ? 1 - clamp((enemyDistance - 1) / 4, 0, 1) : 0;
+    const shoulder = (portrait ? 1.05 : 1.45) + closeRange * .60;
+    const ahead = cameraLocked ? Math.min(.75, enemyDistance * .32) : .45;
+    const horizontal = Math.cos(cameraPitch) * boom;
+    desiredCameraPosition.set(
+      followAnchor.x - forwardX * horizontal + rightX * shoulder,
+      followAnchor.y + Math.sin(cameraPitch) * boom,
+      followAnchor.z - forwardZ * horizontal + rightZ * shoulder,
+    );
+    desiredCameraTarget.set(
+      followAnchor.x + forwardX * ahead + rightX * shoulder * .3,
+      followAnchor.y + .05,
+      followAnchor.z + forwardZ * ahead + rightZ * shoulder * .3,
+    );
+    if (snap) {
+      camera.position.copy(desiredCameraPosition);
+      cameraTarget.copy(desiredCameraTarget);
+    } else {
+      camera.position.lerp(desiredCameraPosition, positionBlend);
+      cameraTarget.lerp(desiredCameraTarget, followBlend);
+    }
+    // Pull in immediately at a wall; normal position smoothing eases back out.
+    resolveCameraObstruction(actualAnchor);
+    framedTarget.copy(cameraTarget);
+    // Near a pillar, the shoulder offset takes up more of the narrow view.
+    // Aim halfway between the fighters' sight lines as the follow arm retracts.
+    const armLength = actualAnchor.distanceTo(camera.position);
+    const closeWallBlend = 1 - ease((armLength - 1.8) / 2.2);
+    if (closeWallBlend > 0) {
+      nearView.subVectors(actualAnchor, camera.position).normalize();
+      if (cameraLocked) {
+        enemyView.set(enemy.x, 1.1, enemy.z).sub(camera.position).normalize();
+        nearView.add(enemyView).normalize();
+      }
+      nearView.multiplyScalar(Math.max(.5, camera.position.distanceTo(cameraTarget))).add(camera.position);
+      framedTarget.lerp(nearView, closeWallBlend);
+    }
+    camera.lookAt(framedTarget);
+    camera.updateMatrixWorld(true);
+    moonHalo.quaternion.copy(camera.quaternion);
+  }
+
+  function movementBasis() {
+    camera.getWorldDirection(viewDirection);
+    const horizontalLength = Math.hypot(viewDirection.x, viewDirection.z);
+    const x = horizontalLength > .0001 ? viewDirection.x / horizontalLength : Math.sin(cameraYaw);
+    const z = horizontalLength > .0001 ? viewDirection.z / horizontalLength : Math.cos(cameraYaw);
+    return { forward: { x, z }, right: { x: -z, z: x } };
+  }
+
+  function cameraSnapshot(game) {
+    camera.updateMatrixWorld(true);
+    const plain = value => ({ x: value.x, y: value.y, z: value.z });
+    const project = (fighter, y) => fighter
+      ? plain(new THREE.Vector3(fighter.x, y, fighter.z).project(camera)) : null;
+    const enemyHeight = game?.mode === 'boss' ? 2.16 : 1.88;
+    return {
+      type: 'perspective', perspective: camera.isPerspectiveCamera, fov: camera.fov,
+      aspect: camera.aspect, locked: cameraLocked, obstructed: cameraObstructed,
+      position: plain(camera.position), target: plain(framedTarget),
+      player: project(game?.player, 1), enemy: project(game?.enemy, enemyHeight * .52),
+      playerBounds: { feet: project(game?.player, .03), head: project(game?.player, 1.88) },
+      enemyBounds: { feet: project(game?.enemy, .03), head: project(game?.enemy, enemyHeight) },
+    };
+  }
+
   function resize() {
     const rect = canvas.getBoundingClientRect();
     width = Math.max(1, rect.width); height = Math.max(1, rect.height);
     renderer.setSize(width, height, false);
-    const aspect = width / height;
-    const half = aspect < 1.05 ? 12.1 / aspect : 11.5;
-    camera.left = -half * aspect; camera.right = half * aspect;
-    camera.top = half; camera.bottom = -half;
+    camera.aspect = width / height;
+    camera.fov = camera.aspect < .85 ? 66 : camera.aspect < 1.2 ? 62 : 58;
     camera.updateProjectionMatrix();
   }
 
-  function render(game, dt = 1 / 60, elapsed = 0) {
+  function render(game, dt = 1 / 60, elapsed = 0, locked = true) {
     dt = clamp(dt || 0, 0, .1);
     elapsed = Number.isFinite(elapsed) ? elapsed : game.elapsed || 0;
     if (lastMode !== game.mode || (previousResult && previousResult !== 'playing' && game.result === 'playing')) {
       for (const rig of Object.values(fighters)) { rig.lastX = null; rig.lastZ = null; rig.root.rotation.z = 0; }
       lastMode = game.mode;
+      resetCamera(game);
     }
     previousResult = game.result;
-    const targetZoom = game.presentationPlaying ? 1.14 : 1;
-    const zoomBlend = 1 - Math.exp(-Math.max(dt, .008) * 5);
-    if (Math.abs(camera.zoom - targetZoom) > .0001) {
-      camera.zoom += (targetZoom - camera.zoom) * zoomBlend;
-      camera.updateProjectionMatrix();
-    }
+    updateCamera(game, dt, locked);
     updateFighter(fighters.player, game.player, dt, elapsed, false, game.mode);
     updateFighter(fighters.enemy, game.enemy, dt, elapsed, true, game.mode);
     flames.forEach(flame => {
@@ -656,15 +804,6 @@ export function createRenderer(canvas) {
     renderer.render(scene, camera);
   }
 
-  function projectPointer(clientX, clientY) {
-    const rect = canvas.getBoundingClientRect();
-    if (!rect.width || !rect.height) return null;
-    pointer.set((clientX - rect.left) / rect.width * 2 - 1, -(clientY - rect.top) / rect.height * 2 + 1);
-    raycaster.setFromCamera(pointer, camera);
-    const result = raycaster.ray.intersectPlane(groundPlane, groundPoint);
-    return result ? { x: result.x, z: result.z } : null;
-  }
-
   function dispose() {
     staticInstances.forEach(item => item.dispose());
     geometryCache.forEach(geo => geo.dispose());
@@ -675,5 +814,5 @@ export function createRenderer(canvas) {
   }
   resize();
   const stats = () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, staticBatches: staticInstances.length });
-  return { render, resize, projectPointer, burst, dispose, stats };
+  return { render, resize, burst, dispose, stats, resetCamera, orbit, movementBasis, cameraSnapshot };
 }

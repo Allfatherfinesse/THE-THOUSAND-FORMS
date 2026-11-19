@@ -7,12 +7,12 @@ This is a separate browser implementation; it does not certify the Unreal projec
 ## Play
 
 The private hosted game is at https://thousand-forms-ashen-courtyard.ezcookings.chatgpt.site.
-The currently published build is the original browser version (saved version 1).
-The newer explicit full-screen button and input-lifecycle changes in this source
-checkout have not been uploaded: the Sites credential service currently rejects
-this client with `sites_git_client_upgrade_required`.
+The camera follows behind your fighter. Opponent lock starts on so you can circle
+while keeping the other fighter in view. Press Tab or tap the target icon to
+release the lock. Right-drag with a mouse or drag the open scene on touch to look
+around. Movement and directional evades follow the current camera view.
 
-In this source build, use the expand button at the top right for full-screen play.
+Use the expand button at the top right for full-screen play.
 Escape exits full screen and pauses. Changes of viewport/focus release held
 controls; full-screen requests denied by an embedded browser show a fallback
 message without stopping the game. The app manifest supports standalone launch
@@ -33,12 +33,13 @@ resists ordinary flinches during attacks; deflects and posture breaks interrupt 
 | --- | --- |
 | WASD / arrows | Move relative to the screen |
 | J / left mouse | Light strike |
-| K / right mouse | Heavy strike |
+| K / right mouse while locked | Heavy strike |
 | F | Tap near impact to deflect; hold to guard |
 | Space | Evade in movement direction, otherwise backward |
 | 1 / 2 / 3 or Q | Select or cycle Muay Thai / Wing Chun / Taekwondo |
 | E | Borrow the next style's heavy strike |
-| Tab | Toggle automatic opponent facing / mouse aim |
+| Tab / target button | Toggle opponent lock |
+| Right-drag / touch drag on the scene | Orbit in free camera |
 | Escape / P | Pause; focus loss also pauses automatically |
 | R | Reset the encounter |
 
@@ -73,6 +74,8 @@ The optional browser test uses Playwright:
 # Install Playwright separately if it is not already available.
 GAME_URL=http://127.0.0.1:4173 node tests/browser-smoke.mjs
 GAME_URL=http://127.0.0.1:4173 node tests/fullscreen.test.mjs
+GAME_URL=http://127.0.0.1:4173 node tests/third-person.test.mjs
+GAME_URL=http://127.0.0.1:4173 node tests/camera-perimeter.test.mjs
 ```
 
 `PLAYWRIGHT_MODULE` may name an existing installation and `BROWSER_PATH` may select

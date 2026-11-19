@@ -20,7 +20,7 @@ try {
 
 let started = false, paused = false, selectedMode = 'sparring', selectedStyle = 0;
 let muted = false, locked = true, lastFrame = performance.now(), elapsed = 0;
-let pointer = null, messageUntil = 0, resultShown = false, hitstop = 0;
+let cameraLookPointer = null, messageUntil = 0, resultShown = false, hitstop = 0;
 let lastStyle = -1, lastIntent = '', joystickPointer = null;
 let touchGuard = null;
 const keys = new Set(), joystick = { x: 0, z: 0 };
@@ -37,7 +37,9 @@ function resetInput() {
   keys.clear(); joystick.x = 0; joystick.z = 0;
   game.setGuard(false);
   game.player.buffer = null;
-  pointer = null;
+  const look = cameraLookPointer;
+  cameraLookPointer = null;
+  if (look && canvas.hasPointerCapture(look.id)) canvas.releasePointerCapture(look.id);
   const movePointer = joystickPointer, guard = touchGuard;
   joystickPointer = null; touchGuard = null;
   const stick = $('joystick');
@@ -74,6 +76,8 @@ function startGame(mode = selectedMode) {
   game.player.hybridStyle = (selectedStyle + 1) % STYLES.length;
   game.drainEvents();
   started = true; paused = false; resultShown = false; locked = true;
+  renderer.resetCamera(game);
+  updateLockButton();
   hitstop = 0; resetInput();
   stats.hits = 0; stats.deflects = 0; stats.start = elapsed;
   $('start-overlay').hidden = true;
@@ -85,7 +89,7 @@ function startGame(mode = selectedMode) {
   $('pause-toggle').setAttribute('aria-label', 'Pause game');
   canvas.focus({ preventScroll: true });
   sound.unlock();
-  showMessage(mode === 'boss' ? 'THE FRACTURED MASTER · Read the tell. Find your opening.' : 'SPARRING · Watch the amber tell, then counter.', 3.5);
+  $('combat-message').classList.remove('visible', 'app-notice');
   lastStyle = -1;
   updateHud();
 }
@@ -105,6 +109,7 @@ function returnToMenu() {
   started = false; paused = false; resultShown = false; resetInput();
   game.reset(selectedMode);
   game.presentationPlaying = false;
+  renderer?.resetCamera(game);
   $('start-overlay').hidden = false;
   $('pause-overlay').hidden = true;
   $('result-overlay').hidden = true;
@@ -114,9 +119,25 @@ function returnToMenu() {
 
 function act(name, value) {
   if (!started || paused || game.result !== 'playing') return;
+  if (name === 'evade') game.setInput(readCombatInput());
   if (name === 'hybrid') game.setHybridStyle((game.player.style + 1) % STYLES.length);
   if (!game.action(name, value) && game.player.stamina < 25) showMessage('CATCH YOUR BREATH', .7);
 }
+
+function updateLockButton() {
+  $('camera-help').hidden = locked;
+  $('lock-toggle').setAttribute('aria-pressed', String(locked));
+  $('lock-toggle').setAttribute('aria-label', locked ? 'Release opponent lock' : 'Lock onto opponent');
+  $('lock-toggle').title = locked ? 'Opponent locked · Tab' : 'Free camera · Tab to lock';
+}
+function toggleLock() {
+  if (!started || paused || game.result !== 'playing') return;
+  locked = !locked;
+  updateLockButton();
+
+  canvas.focus({ preventScroll: true });
+}
+$('lock-toggle').addEventListener('click', toggleLock);
 
 document.querySelectorAll('[data-start]').forEach(b => b.addEventListener('click', () => startGame()));
 document.querySelectorAll('[data-restart]').forEach(b => b.addEventListener('click', () => startGame()));
@@ -168,7 +189,7 @@ window.addEventListener('keydown', (event) => {
   if (event.code === 'KeyF') game.setGuard(true);
   if (event.code === 'KeyR') startGame();
   if (event.code.startsWith('Digit')) act('style', Number(event.code.slice(-1)) - 1);
-  if (event.code === 'Tab') { locked = !locked; showMessage(locked ? 'FOCUS · Facing your opponent' : 'FREE AIM · Follow the cursor', 1.4); }
+  if (event.code === 'Tab') toggleLock();
 });
 window.addEventListener('keyup', event => {
   keys.delete(event.code);
@@ -177,12 +198,29 @@ window.addEventListener('keyup', event => {
 window.addEventListener('blur', () => { if (started && !paused && !appShell.busy) pauseGame(true); resetInput(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && started) pauseGame(true); });
 canvas.addEventListener('contextmenu', event => event.preventDefault());
-canvas.addEventListener('pointermove', event => { pointer = renderer?.projectPointer(event.clientX, event.clientY); });
+canvas.addEventListener('pointermove', event => {
+  if (cameraLookPointer?.id !== event.pointerId) return;
+  const dx = event.clientX - cameraLookPointer.x, dy = event.clientY - cameraLookPointer.y;
+  cameraLookPointer.x = event.clientX; cameraLookPointer.y = event.clientY;
+  if (!paused && !locked) renderer?.orbit(dx, dy);
+});
 canvas.addEventListener('pointerdown', event => {
-  if (event.pointerType === 'touch') return;
+  if (!started || paused || game.result !== 'playing') return;
   canvas.focus({ preventScroll: true });
-  pointer = renderer?.projectPointer(event.clientX, event.clientY);
-  act(event.button === 2 ? 'heavy' : 'light');
+  if (event.button === 2 && locked && event.pointerType === 'mouse') {
+    act('heavy');
+    return;
+  }
+  if (event.pointerType === 'touch' || event.button === 2) {
+    if (locked) return;
+    event.preventDefault();
+    if (cameraLookPointer !== null) return;
+    cameraLookPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    canvas.setPointerCapture(event.pointerId);
+  } else if (event.button === 0) act('light');
+});
+for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(name, event => {
+  if (cameraLookPointer?.id === event.pointerId) cameraLookPointer = null;
 });
 
 document.querySelectorAll('[data-action]').forEach(b => {
@@ -235,7 +273,7 @@ function updateHud() {
   $('enemy-name').textContent = game.mode === 'boss' ? 'THE FRACTURED MASTER' : 'THE SILENT DISCIPLE';
   let intent = enemy.state === 'windup' ? `${enemy.attack?.name || 'Attack'} · Incoming` :
     enemy.state === 'broken' ? 'Posture broken · Strike now' : enemy.state === 'recovery' ? 'An opening' :
-    game.phase > 1 ? 'Phase II · Unbound' : game.mode === 'boss' ? 'Guardian of the ashen courtyard' : 'Read the rhythm. Find your form.';
+    game.phase > 1 ? 'Phase II · Unbound' : game.mode === 'boss' ? 'Guardian of the ashen courtyard' : 'Watch the amber tell, then counter.';
   if (intent !== lastIntent) { $('enemy-intent').textContent = intent; lastIntent = intent; }
   $('enemy-intent').classList.toggle('danger', enemy.state === 'windup');
   document.body.classList.toggle('low-health', player.health < player.maxHealth * .25 && player.health > 0);
@@ -272,23 +310,29 @@ function showResult() {
   document.querySelector('[data-restart]')?.focus();
 }
 
+function readCombatInput() {
+  const horizontal = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) + joystick.x;
+  const vertical = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - joystick.z;
+  const basis = renderer.movementBasis();
+  let x = horizontal * basis.right.x + vertical * basis.forward.x;
+  let z = horizontal * basis.right.z + vertical * basis.forward.z;
+  const length = Math.hypot(x, z); if (length > 1) { x /= length; z /= length; }
+  const aim = locked ? { x: game.enemy.x - game.player.x, z: game.enemy.z - game.player.z }
+    : length > .01 ? { x, z } : { x: Math.sin(game.player.yaw), z: Math.cos(game.player.yaw) };
+  return { x, z, aimX: aim.x, aimZ: aim.z };
+}
+
 function frame(now) {
   const dt = Math.min((now - lastFrame) / 1000, .05); lastFrame = now;
   elapsed += dt;
   if (started && !paused && game.result === 'playing') {
-    let horizontal = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0) + joystick.x;
-    let vertical = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0) - joystick.z;
-    let x = horizontal * .759 - vertical * .651, z = -horizontal * .651 - vertical * .759;
-    const length = Math.hypot(x, z); if (length > 1) { x /= length; z /= length; }
-    const target = !locked && pointer ? pointer : game.enemy;
-    const input = { x, z, aimX: target.x - game.player.x, aimZ: target.z - game.player.z };
     if (hitstop > 0) hitstop -= dt;
-    else game.update(dt, input);
+    else game.update(dt, readCombatInput());
     processEvents(); updateHud();
     if (game.result !== 'playing' && !resultShown) showResult();
   }
   if (elapsed > messageUntil) $('combat-message').classList.remove('visible');
-  renderer?.render(game, paused ? 0 : dt, elapsed);
+  renderer?.render(game, paused ? 0 : dt, elapsed, locked);
   requestAnimationFrame(frame);
 }
 window.addEventListener('resize', resizeGame);
@@ -303,7 +347,8 @@ requestAnimationFrame(frame);
 
 // Read-only QA snapshot: tests observe the same model used by the live game.
 Object.defineProperty(window, '__THOUSAND_FORMS__', { value: {
-  snapshot: () => ({ started, paused, fullscreen: appShell.active(), keys: [...keys], joystick: { ...joystick },
+  snapshot: () => ({ started, paused, locked, camera: renderer?.cameraSnapshot(game), cameraLookPointer: cameraLookPointer?.id ?? null,
+    fullscreen: appShell.active(), keys: [...keys], joystick: { ...joystick },
     joystickPointer, touchGuard: touchGuard?.id ?? null, mode: game.mode, result: game.result, phase: game.phase,
     player: { ...game.player }, enemy: { ...game.enemy }, time: game.time }),
 }, writable: false });

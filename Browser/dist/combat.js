@@ -99,13 +99,17 @@ export class Game {
     if (Number.isInteger(index) && index >= 0 && index < 3) this.player.hybridStyle = index;
   }
 
-  update(dt, input = {}) {
-    if (!Number.isFinite(dt) || dt <= 0 || this.result !== 'playing') return;
+  setInput(input = {}) {
     this._input = {
       x: Number.isFinite(input.x) ? input.x : 0, z: Number.isFinite(input.z) ? input.z : 0,
       aimX: Number.isFinite(input.aimX) ? input.aimX : undefined,
       aimZ: Number.isFinite(input.aimZ) ? input.aimZ : undefined,
     };
+  }
+
+  update(dt, input = {}) {
+    if (!Number.isFinite(dt) || dt <= 0 || this.result !== 'playing') return;
+    this.setInput(input);
     // Tab resumes never fast-forward an unseen enemy attack.
     this._accumulator += Math.min(dt, .10);
     while (this._accumulator + 1e-9 >= STEP && this.result === 'playing') {
