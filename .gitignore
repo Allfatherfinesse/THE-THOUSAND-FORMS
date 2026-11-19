@@ -7,4 +7,7 @@ Saved/
 .vscode/
 *.sln
 *.suo
+Browser/node_modules/
+Browser/artifacts/
+Browser/*.tar.gz
 # Do not ignore Content: authored assets belong in source control.

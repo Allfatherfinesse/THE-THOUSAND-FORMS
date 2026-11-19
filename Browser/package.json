@@ -1,0 +1,14 @@
+{
+  "name": "thousand-forms-browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/combat.test.mjs",
+    "start": "python3 -m http.server 4173 --directory dist",
+    "build": "esbuild dist/main.js --bundle --minify --format=iife --outfile=dist/game.bundle.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}
