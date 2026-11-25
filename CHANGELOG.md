@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-25 — The ruined sanctuary
+
+- Rebuilt the Ashen Courtyard as a ruined Gothic sanctuary with an eclipsed sky, pointed arches, carved masonry, and an engraved fighting floor. The Seeker and the Master now wear layered cloth and tarnished armor.
+- Added responsive footwork, attack weight transfer, late follow-ups and directional dodge deceleration. The opponent circles at range, backs away when crowded, and plants before committing. Locomotion, attack poses and reactions follow the fighters’ combat timing.
+- Differentiated strike, block and deflect audio, made impact pauses independent of frame boundaries, and reduced rendering work with instanced fighter parts and adaptive canvas resolution.
+
 ## 2026-11-19 — Third-person combat camera
 
 - Published shoulder-view combat, opponent lock and free orbit in the existing private app. The update also delivers the previously prepared fullscreen controls.

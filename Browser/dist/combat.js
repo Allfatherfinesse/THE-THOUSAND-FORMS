@@ -3,7 +3,10 @@ const TAU = Math.PI * 2;
 const STEP = 1 / 120;
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const angleDelta = (a, b) => ((a - b + Math.PI * 3) % TAU) - Math.PI;
+const smoothstep = value => { const t = clamp(value, 0, 1); return t * t * (3 - 2 * t); };
 const ready = fighter => fighter.state === 'idle' || fighter.state === 'guard';
+const attacking = fighter => ['windup', 'active', 'recovery'].includes(fighter.state);
+const strikeAction = name => ['light', 'heavy', 'hybrid'].includes(name);
 const attack = (name, windup, active, recovery, cost, damage, posture, range, arc, lunge = .25) =>
   ({ name, windup, active, recovery, cost, damage, posture, range, arc, lunge, sweep: false });
 
@@ -48,6 +51,8 @@ function makeFighter(id, x, z, health, posture, style) {
     guardHeld: false, guardEligible: false, guardCooldown: 0,
     staminaDelay: 0, postureDelay: 0, buffer: null, attackSequence: 0,
     hitTargets: new Set(), dodgeX: 0, dodgeZ: 0, pendingStyle: style,
+    vx: 0, vz: 0, speed: 0, movePhase: 0, weightShift: 0, comboIndex: 0, footwork: 'idle',
+    _motorX: 0, _motorZ: 0, _driveProgress: 0, _comboUntil: 0,
   };
 }
 
@@ -83,8 +88,11 @@ export class Game {
       : undefined;
     if (name === 'style' && (targetStyle < 0 || targetStyle > 2 || targetStyle === fighter.style)) return false;
     if (ready(fighter)) return this._startAction(fighter, name, targetStyle);
-    if (fighter.state === 'stun' || fighter.state === 'broken') return false;
-    fighter.buffer = { name, targetStyle, expires: this.time + .24 };
+    if (fighter.state === 'broken') return false;
+    // A late press survives recovery without allowing an attack to escape an
+    // active hit or a fresh stagger. This is one intent, never an action queue.
+    if (fighter.state === 'stun' && fighter.stateDuration - fighter.stateTime > .18) return false;
+    fighter.buffer = { name, targetStyle, expires: this.time + .32 };
     return true;
   }
 
@@ -128,6 +136,16 @@ export class Game {
     fighter.stateDuration = duration;
     fighter.invulnerable = false;
     fighter.armored = this.mode === 'boss' && fighter.id === 'enemy' && (state === 'windup' || state === 'active');
+    if (state === 'windup') fighter.footwork = 'plant';
+    else if (state === 'active' || state === 'evade') fighter.footwork = 'attack';
+    else if (state === 'recovery') fighter.footwork = 'plant';
+    if (['stun', 'broken', 'dead', 'evade', 'switch'].includes(state)) {
+      fighter._comboUntil = 0;
+      fighter.comboIndex = 0;
+      fighter.weightShift = 0;
+      fighter._motorX = 0;
+      fighter._motorZ = 0;
+    }
     if (state === 'guard') {
       fighter.guardEligible = fighter.guardCooldown <= 0;
       if (fighter.guardEligible) fighter.guardCooldown = .38;
@@ -136,6 +154,7 @@ export class Game {
       fighter.attack = null;
       fighter.attackTime = 0;
       fighter.attackDuration = 0;
+      fighter.weightShift = 0;
     }
   }
 
@@ -175,13 +194,21 @@ export class Game {
   _beginAttack(fighter, spec) {
     if (fighter.stamina < spec.cost) return false;
     this._spend(fighter, spec.cost);
-    fighter.attack = { ...spec };
+    fighter.comboIndex = fighter.attackSequence > 0 && this.time < fighter._comboUntil
+      ? (fighter.comboIndex + 1) % 3 : 0;
+    fighter.attack = { ...spec, comboIndex: fighter.comboIndex };
     fighter.attackTime = 0;
     fighter.attackDuration = spec.windup + spec.active + spec.recovery;
+    fighter._comboUntil = this.time + fighter.attackDuration + .32;
+    fighter._driveProgress = 0;
+    // Plant before transferring weight: inherited running momentum must not
+    // carry a committed strike sideways through its target.
+    fighter._motorX *= .22;
+    fighter._motorZ *= .22;
     fighter.hitTargets.clear();
     fighter.attackSequence++;
     this._enter(fighter, 'windup', spec.windup);
-    this._event('attack', fighter, { kind: spec.kind, style: spec.style, name: spec.name });
+    this._event('attack', fighter, { kind: spec.kind, style: spec.style, name: spec.name, comboIndex: fighter.comboIndex });
     return true;
   }
 
@@ -189,7 +216,7 @@ export class Game {
     const state = fighter.state;
     if (state === 'windup') {
       this._enter(fighter, 'active', fighter.attack.active);
-      this._event('strike', fighter, { kind: fighter.attack.kind, style: fighter.attack.style });
+      this._event('strike', fighter, { kind: fighter.attack.kind, style: fighter.attack.style, comboIndex: fighter.comboIndex });
       return;
     }
     if (state === 'active') { this._enter(fighter, 'recovery', fighter.attack.recovery); return; }
@@ -211,6 +238,7 @@ export class Game {
     fighter.staminaDelay = Math.max(0, fighter.staminaDelay - dt);
     fighter.postureDelay = Math.max(0, fighter.postureDelay - dt);
     if (fighter.buffer && fighter.buffer.expires <= this.time) fighter.buffer = null;
+    if (ready(fighter) && this.time >= fighter._comboUntil) fighter.comboIndex = 0;
     if (ready(fighter) || fighter.state === 'recovery') {
       if (fighter.staminaDelay <= 0) {
         const rate = fighter.state === 'guard' ? 13 : 32;
@@ -221,6 +249,19 @@ export class Game {
     }
     fighter.stateTime += dt;
     if (fighter.attack) fighter.attackTime += dt;
+    // Followups use the settling part of recovery. The strike and early recoil
+    // remain committed, and every followup still pays its full stamina cost.
+    if (fighter.id === 'player' && fighter.state === 'recovery') {
+      const buffered = fighter.buffer;
+      const fraction = fighter.stateTime / fighter.stateDuration;
+      const threshold = buffered && strikeAction(buffered.name) ? .72 : .84;
+      if (buffered && fraction >= threshold) {
+        fighter.buffer = null;
+        this._startAction(fighter, buffered.name, buffered.targetStyle);
+      } else if (!buffered && fighter.guardHeld && fraction >= .84) {
+        this._enter(fighter, 'guard');
+      }
+    }
     if (fighter.stateDuration > 0 && fighter.stateTime + 1e-9 >= fighter.stateDuration) this._finish(fighter);
     fighter.invulnerable = fighter.state === 'evade' && fighter.stateTime >= .025 && fighter.stateTime < .30;
   }
@@ -231,57 +272,125 @@ export class Game {
     this._confine(fighter);
   }
 
+  _steer(fighter, targetX, targetZ, acceleration, dt, gait = false) {
+    const deltaX = targetX - fighter._motorX, deltaZ = targetZ - fighter._motorZ;
+    const distance = Math.hypot(deltaX, deltaZ);
+    const amount = Math.min(1, acceleration * dt / Math.max(distance, 1e-8));
+    fighter._motorX += deltaX * amount;
+    fighter._motorZ += deltaZ * amount;
+    const previousX = fighter.x, previousZ = fighter.z;
+    this._move(fighter, fighter._motorX, fighter._motorZ, 1, dt);
+    // Gait follows actual grounded travel, rather than input strength or wall
+    // pushing. Attack drive, collisions and dodge motion never make footsteps.
+    if (gait) fighter.movePhase += Math.hypot(fighter.x - previousX, fighter.z - previousZ) * 4;
+  }
+
+  _face(fighter, x, z, rate, dt) {
+    if (Math.hypot(x, z) < .01) return;
+    const turn = angleDelta(Math.atan2(x, z), fighter.yaw);
+    const eased = turn * (1 - Math.exp(-rate * dt));
+    fighter.yaw += clamp(eased, -24 * dt, 24 * dt);
+    fighter.yaw = Math.atan2(Math.sin(fighter.yaw), Math.cos(fighter.yaw));
+  }
+
   _confine(fighter) {
     const distance = Math.hypot(fighter.x, fighter.z);
     const limit = this.arenaRadius - fighter.radius;
-    if (distance > limit) { fighter.x *= limit / distance; fighter.z *= limit / distance; }
+    if (distance > limit) {
+      fighter.x *= limit / distance; fighter.z *= limit / distance;
+      const nx = fighter.x / limit, nz = fighter.z / limit;
+      const outward = fighter._motorX * nx + fighter._motorZ * nz;
+      if (outward > 0) { fighter._motorX -= outward * nx; fighter._motorZ -= outward * nz; }
+    }
   }
 
   _movePlayer(dt) {
     const fighter = this.player;
-    if (['dead', 'stun', 'broken', 'switch'].includes(fighter.state)) return;
+    if (['dead', 'stun', 'broken', 'switch'].includes(fighter.state)) { fighter.footwork = 'idle'; return; }
     if (fighter.state === 'evade') {
-      this._move(fighter, fighter.dodgeX, fighter.dodgeZ, fighter.stateTime < .29 ? 8 : 3.5, dt);
+      const speed = 8 * (1 - .75 * smoothstep((fighter.stateTime - .22) / .22));
+      this._move(fighter, fighter.dodgeX, fighter.dodgeZ, speed, dt);
       return;
     }
     const length = Math.hypot(this._input.x, this._input.z);
     const movement = Math.min(length, 1);
     let factor = 1;
     if (fighter.state === 'guard') factor = .45;
-    else if (fighter.state === 'windup') factor = .28;
-    else if (fighter.state === 'active') factor = .12;
-    else if (fighter.state === 'recovery') factor = .55;
-    if (length > 0) this._move(fighter, this._input.x / length, this._input.z / length,
-      (fighter.style === 2 ? 4.65 : 4.3) * movement * factor, dt);
+    else if (fighter.state === 'windup') factor = .18 * (1 - smoothstep(fighter.stateTime / (fighter.stateDuration * .55)));
+    else if (fighter.state === 'active') factor = 0;
+    else if (fighter.state === 'recovery') factor = .65 * smoothstep((fighter.stateTime / fighter.stateDuration - .45) / .55);
+    const desiredSpeed = (fighter.style === 2 ? 4.65 : 4.3) * movement * factor;
+    const targetX = length > 0 ? this._input.x / length * desiredSpeed : 0;
+    const targetZ = length > 0 ? this._input.z / length * desiredSpeed : 0;
+    const braking = desiredSpeed < Math.hypot(fighter._motorX, fighter._motorZ)
+      || targetX * fighter._motorX + targetZ * fighter._motorZ < 0;
+    const gait = ready(fighter) || (fighter.state === 'recovery' && factor > .15);
+    this._steer(fighter, targetX, targetZ, attacking(fighter) ? 65 : (braking ? 55 : 42), dt, gait);
+    if (gait) fighter.footwork = desiredSpeed < .05 ? 'idle'
+      : (targetX * Math.sin(fighter.yaw) + targetZ * Math.cos(fighter.yaw) < -.2 ? 'retreat' : 'approach');
     if (ready(fighter) || (fighter.state === 'windup' && fighter.stateTime < fighter.stateDuration * .65)) {
       let aimX = this._input.aimX, aimZ = this._input.aimZ;
       if (aimX === undefined || aimZ === undefined || Math.hypot(aimX, aimZ) < .01) {
         aimX = this.enemy.x - fighter.x; aimZ = this.enemy.z - fighter.z;
       }
-      if (Math.hypot(aimX, aimZ) > .01) fighter.yaw = Math.atan2(aimX, aimZ);
+      this._face(fighter, aimX, aimZ, 30, dt);
     }
   }
 
   _updateAI(dt) {
-    if (!this.aiEnabled || this.enemy.state === 'dead') return;
     const fighter = this.enemy;
+    if (!this.aiEnabled || fighter.state === 'dead') { this._steer(fighter, 0, 0, 22, dt); return; }
     const dx = this.player.x - fighter.x, dz = this.player.z - fighter.z;
     const distance = Math.hypot(dx, dz);
     if (ready(fighter) || (fighter.state === 'windup' && fighter.stateTime < fighter.stateDuration * .65))
-      fighter.yaw = Math.atan2(dx, dz);
-    if (!ready(fighter)) return;
+      this._face(fighter, dx, dz, 12, dt);
+    if (!ready(fighter)) {
+      let retreat = 0;
+      if (fighter.state === 'recovery' && fighter.stateTime / fighter.stateDuration > .68 && distance < 1.2) retreat = -.7;
+      this._steer(fighter, distance > .01 ? dx / distance * retreat : 0,
+        distance > .01 ? dz / distance * retreat : 0, 22, dt, retreat !== 0);
+      if (retreat !== 0) fighter.footwork = 'retreat';
+      return;
+    }
     this._aiCooldown -= dt;
     const patterns = ENEMY_ATTACKS[this.mode];
     const spec = { ...patterns[this._aiStep % patterns.length] };
     if (this.phase === 2) { spec.windup -= .10; spec.recovery -= .06; }
-    if (distance > spec.range * .78) {
-      if (distance > .01) this._move(fighter, dx / distance, dz / distance, this.mode === 'boss' ? 2.25 : 1.9, dt);
-      return;
-    }
-    if (this._aiCooldown <= 0 && this._beginAttack(fighter, spec)) {
+    const preferredRange = spec.range * .78;
+    const error = distance - preferredRange;
+    const radial = clamp(error * 3.5, -1.15, this.mode === 'boss' ? 2.25 : 1.9);
+    const orbit = Math.abs(error) < .6 && this._aiCooldown > .16 ? (this._aiStep % 2 ? -1 : 1) * .65 : 0;
+    const nx = distance > .01 ? dx / distance : 0, nz = distance > .01 ? dz / distance : 1;
+    const canAttack = this._aiCooldown <= 0 && distance < spec.range * .93
+      && Math.abs(angleDelta(Math.atan2(dx, dz), fighter.yaw)) < .20;
+    this._steer(fighter, canAttack ? 0 : nx * radial - nz * orbit,
+      canAttack ? 0 : nz * radial + nx * orbit, 10, dt, !canAttack);
+    fighter.footwork = canAttack ? 'plant' : (error > .3 ? 'approach' : (error < -.2 ? 'retreat' : (orbit ? 'circle' : 'idle')));
+    if (canAttack && this._beginAttack(fighter, spec)) {
       this._aiStep++;
       this._aiCooldown = this.mode === 'boss' ? (this.phase === 2 ? .28 : .48) : .65;
     }
+  }
+
+  _driveAttack(fighter) {
+    if (!attacking(fighter) || !fighter.attack) { fighter.weightShift = 0; return; }
+    const spec = fighter.attack;
+    const start = spec.windup * .60, end = spec.windup + spec.active * .78;
+    const progress = smoothstep((fighter.attackTime - start) / (end - start));
+    let distance = Math.max(0, progress - fighter._driveProgress) * spec.lunge;
+    fighter._driveProgress = progress;
+    const nx = Math.sin(fighter.yaw), nz = Math.cos(fighter.yaw);
+    const target = fighter.id === 'player' ? this.enemy : this.player;
+    const dx = target.x - fighter.x, dz = target.z - fighter.z;
+    const along = dx * nx + dz * nz, across = Math.abs(dx * nz - dz * nx);
+    const separation = fighter.radius + target.radius + .06;
+    if (along > 0 && across < separation) distance = Math.min(distance, Math.max(0, along - separation));
+    // Integrating an eased distance curve avoids constant-velocity skating and
+    // prevents a lunge from shoving a planted opponent across the floor.
+    this._move(fighter, nx, nz, distance, 1);
+    fighter.weightShift = fighter.state === 'windup'
+      ? smoothstep((fighter.stateTime / fighter.stateDuration - .60) / .40)
+      : fighter.state === 'active' ? 1 : 1 - smoothstep(fighter.stateTime / fighter.stateDuration);
   }
 
   _separate() {
@@ -348,18 +457,21 @@ export class Game {
 
   _step(dt) {
     this.time += dt;
+    const positions = [this.player, this.enemy].map(fighter => ({ x: fighter.x, z: fighter.z }));
     this._movePlayer(dt);
     this._updateAI(dt);
     this._tickFighter(this.player, dt);
     this._tickFighter(this.enemy, dt);
-    for (const fighter of [this.player, this.enemy]) {
-      if (fighter.state === 'active') this._move(fighter, Math.sin(fighter.yaw), Math.cos(fighter.yaw),
-        fighter.attack.lunge / fighter.attack.active, dt);
-    }
+    for (const fighter of [this.player, this.enemy]) this._driveAttack(fighter);
     this._separate();
     // Snapshot both active attacks before applying either hit, allowing fair trades.
     const hits = [this._hitCandidate(this.player, this.enemy), this._hitCandidate(this.enemy, this.player)];
     for (const hit of hits) if (hit) this._receive(hit);
+    [this.player, this.enemy].forEach((fighter, index) => {
+      fighter.vx = (fighter.x - positions[index].x) / dt;
+      fighter.vz = (fighter.z - positions[index].z) / dt;
+      fighter.speed = Math.hypot(fighter.vx, fighter.vz);
+    });
     if (this.player.health <= 0 || this.enemy.health <= 0) {
       this.result = this.player.health <= 0 ? 'lost' : 'won';
       this._event(this.result === 'won' ? 'win' : 'lose', this.player);

@@ -255,6 +255,8 @@ test('fixed-step gameplay matches across 30Hz and 120Hz frame delivery', () => {
     near(slow[name].x, fast[name].x, .00001);
     near(slow[name].z, fast[name].z, .00001);
     near(slow[name].health, fast[name].health, .00001);
+    for (const field of ['vx', 'vz', 'speed', 'movePhase', 'weightShift']) near(slow[name][field], fast[name][field], .00001);
+    assert.equal(slow[name].comboIndex, fast[name].comboIndex);
     assert.equal(slow[name].state, fast[name].state);
   }
 });
@@ -295,5 +297,121 @@ test('both encounters are winnable with visible tells and recovery punishments',
     assert.equal(game.result, 'won', `${mode} should be winnable`);
     assert.ok(game.player.health > 0);
     if (mode === 'boss') assert.equal(game.phase, 2);
+  }
+});
+
+test('locomotion accelerates responsively and brakes to a planted stop', () => {
+  const game = isolated('sparring', 7);
+  game.update(FRAME, { x: 1, z: 0 });
+  assert.ok(game.player.speed > 0 && game.player.speed < 1);
+  advance(game, .15, { x: 1, z: 0 });
+  near(game.player.speed, 4.3);
+  const phase = game.player.movePhase;
+  const position = game.player.x;
+  game.update(FRAME);
+  assert.ok(game.player.speed > 0 && game.player.speed < 4.3);
+  advance(game, .12);
+  near(game.player.speed, 0, .00001);
+  assert.ok(game.player.x - position < .20);
+  assert.ok(game.player.movePhase > phase);
+  const stoppedPhase = game.player.movePhase;
+  advance(game, .2);
+  near(game.player.movePhase, stoppedPhase, .00001);
+});
+
+test('enemy circles at useful range and creates space when crowded', () => {
+  const circle = isolated('sparring', 1.6);
+  circle.aiEnabled = true;
+  advance(circle, .55);
+  assert.equal(circle.enemy.state, 'idle');
+  assert.equal(circle.enemy.footwork, 'circle');
+  assert.ok(Math.abs(circle.enemy.x) > .15);
+  const range = Math.hypot(circle.enemy.x - circle.player.x, circle.enemy.z - circle.player.z);
+  assert.ok(range > 1.3 && range < 1.9);
+
+  const crowded = isolated('sparring', .95);
+  crowded.aiEnabled = true;
+  advance(crowded, .25);
+  assert.equal(crowded.enemy.footwork, 'retreat');
+  assert.ok(Math.hypot(crowded.enemy.x - crowded.player.x, crowded.enemy.z - crowded.player.z) > 1.1);
+});
+
+test('committed attacks plant lateral movement and transfer weight without pushing the target', () => {
+  const planted = isolated('sparring', 7);
+  planted.action('heavy');
+  while (planted.player.state !== 'active') planted.update(FRAME);
+  const x = planted.player.x;
+  const phase = planted.player.movePhase;
+  advance(planted, .12, { x: 1, z: 0 });
+  near(planted.player.x, x, .00001);
+  near(planted.player.movePhase, phase, .00001);
+  near(planted.player.weightShift, 1);
+
+  const close = isolated('sparring', .98);
+  const targetX = close.enemy.x, targetZ = close.enemy.z;
+  close.action('heavy');
+  advance(close, .6);
+  near(close.enemy.x, targetX, .00001);
+  near(close.enemy.z, targetZ, .00001);
+  assert.ok(Math.hypot(close.enemy.x - close.player.x, close.enemy.z - close.player.z) >= .899);
+  assert.ok(close.player.z < 0);
+});
+
+test('a followup joins late recovery with one stamina charge and a continuous combo identity', () => {
+  const game = isolated('sparring', 7);
+  game.action('light');
+  advance(game, .30);
+  assert.equal(game.player.state, 'recovery');
+  assert.equal(game.action('heavy'), true);
+  advance(game, .16);
+  assert.equal(game.player.state, 'windup');
+  assert.equal(game.player.attack.kind, 'heavy');
+  assert.equal(game.player.comboIndex, 1);
+  assert.equal(game.player.attack.comboIndex, 1);
+  assert.equal(game.player.attackSequence, 2);
+  near(game.player.stamina, 100 - STYLES[0].light.cost - STYLES[0].heavy.cost);
+  const attacks = game.drainEvents().filter(event => event.type === 'attack');
+  assert.deepEqual(attacks.map(event => event.comboIndex), [0, 1]);
+  advance(game, 2);
+  game.action('light');
+  assert.equal(game.player.comboIndex, 0);
+});
+
+test('late stagger input is forgiving without shortening the stagger', () => {
+  const game = enemyWindup();
+  advance(game, game.enemy.stateDuration - game.enemy.stateTime + .01);
+  assert.equal(game.player.state, 'stun');
+  assert.equal(game.action('light'), false);
+  advance(game, .10);
+  assert.equal(game.action('light'), true);
+  advance(game, .10);
+  assert.equal(game.player.state, 'stun');
+  advance(game, .08);
+  assert.equal(game.player.state, 'windup');
+  assert.equal(game.player.attackSequence, 1);
+});
+
+test('defensive inputs can use late attack recovery but never cancel its active frames', () => {
+  const game = isolated('sparring', 7);
+  game.action('heavy');
+  advance(game, .35);
+  assert.equal(game.player.state, 'active');
+  game.setGuard(true);
+  advance(game, .10);
+  assert.equal(game.player.state, 'active');
+  advance(game, .41);
+  assert.equal(game.player.state, 'guard');
+});
+
+test('new motion and combo fields reset with the encounter', () => {
+  const game = isolated('sparring', 7);
+  advance(game, .2, { x: 1, z: 0 });
+  game.action('heavy');
+  advance(game, .3);
+  assert.ok(game.player.weightShift > 0);
+  game.reset('boss');
+  for (const fighter of [game.player, game.enemy]) {
+    for (const field of ['vx', 'vz', 'speed', 'movePhase', 'weightShift', 'comboIndex']) assert.equal(fighter[field], 0);
+    assert.equal(fighter.footwork, 'idle');
   }
 });

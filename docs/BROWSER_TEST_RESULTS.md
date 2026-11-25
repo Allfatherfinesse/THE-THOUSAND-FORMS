@@ -1,5 +1,22 @@
 # Browser prototype: validation evidence
 
+## Gothic sanctuary and combat feel — 2026-11-25
+
+`npm test` passed 26 fixed-step combat tests, including new checks for acceleration,
+braking, enemy spacing, attack drive, recovery links, buffering and encounter reset.
+`npm run build` produced the bundled local game. During integration, the Chromium
+smoke replay won a sparring encounter, restarted, observed a boss windup, and
+verified mobile joystick and strikes. `tests/third-person.test.mjs` passed 9 gates,
+`tests/fullscreen.test.mjs` passed 11, and `tests/camera-perimeter.test.mjs`
+kept both fighters in view at 48 placements. Phone coverage uses Chromium touch
+emulation. The menu, boss tell and combat framing were reviewed in screenshots.
+
+A fixed-camera comparison rendered the same boss pose with fighter instancing
+on and off. Three.js reported **167 vs 240 draw calls**, with **64,756 triangles**
+in both cases. The comparison isolates fighter batching in the updated scene.
+It measures render work rather than device frame rate. Under sustained slow
+frames, the game reduces 3D resolution while the HUD remains at native size.
+
 ## Third-person camera — 2026-11-19
 
 The published bundle passed all 19 combat rule tests. `tests/third-person.test.mjs`

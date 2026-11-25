@@ -76,6 +76,7 @@ function startGame(mode = selectedMode) {
   game.player.hybridStyle = (selectedStyle + 1) % STYLES.length;
   game.drainEvents();
   started = true; paused = false; resultShown = false; locked = true;
+  lastStep.player = lastStep.enemy = 0;
   renderer.resetCamera(game);
   updateLockButton();
   hitstop = 0; resetInput();
@@ -260,17 +261,29 @@ for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) joystic
   joystick.x = joystick.z = 0; joystickPointer = null; $('joystick-nub').style.transform = 'translate(-50%, -50%)';
 });
 
+const hudIds = ['player-health','player-stamina','player-posture','enemy-health','enemy-posture','health-value','stamina-value','enemy-name'];
+const hud = Object.fromEntries(hudIds.map(id => [id, $(id)]));
+const lastMeter = new Map();
+function meter(id, value, max) {
+  const fraction = Math.round(Math.min(1, Math.max(0, value / max)) * 500) / 500;
+  if (lastMeter.get(id) === fraction) return;
+  lastMeter.set(id, fraction);
+  hud[id].style.transform = `scaleX(${fraction})`;
+}
+function hudText(id, value) {
+  const text = String(value);
+  if (hud[id].textContent !== text) hud[id].textContent = text;
+}
 function updateHud() {
   const player = game.player, enemy = game.enemy;
-  const meter = (id, value, max) => { if ($(id)) $(id).style.width = `${Math.max(0, Math.min(100, value / max * 100))}%`; };
   meter('player-health', player.health, player.maxHealth);
   meter('player-stamina', player.stamina, 100);
   meter('player-posture', player.posture, player.maxPosture);
   meter('enemy-health', enemy.health, enemy.maxHealth);
   meter('enemy-posture', enemy.posture, enemy.maxPosture);
-  if ($('health-value')) $('health-value').textContent = Math.ceil(player.health);
-  if ($('stamina-value')) $('stamina-value').textContent = Math.ceil(player.stamina);
-  $('enemy-name').textContent = game.mode === 'boss' ? 'THE FRACTURED MASTER' : 'THE SILENT DISCIPLE';
+  hudText('health-value', Math.ceil(player.health));
+  hudText('stamina-value', Math.ceil(player.stamina));
+  hudText('enemy-name', game.mode === 'boss' ? 'THE FRACTURED MASTER' : 'THE SILENT DISCIPLE');
   let intent = enemy.state === 'windup' ? `${enemy.attack?.name || 'Attack'} · Incoming` :
     enemy.state === 'broken' ? 'Posture broken · Strike now' : enemy.state === 'recovery' ? 'An opening' :
     game.phase > 1 ? 'Phase II · Unbound' : game.mode === 'boss' ? 'Guardian of the ashen courtyard' : 'Watch the amber tell, then counter.';
@@ -287,11 +300,25 @@ function updateHud() {
   }
 }
 
+const lastStep = { player: 0, enemy: 0 };
+function playFootsteps() {
+  for (const fighter of [game.player, game.enemy]) {
+    const beat = Math.floor(fighter.movePhase / Math.PI);
+    if (Number.isFinite(beat) && beat !== lastStep[fighter.id]) {
+      lastStep[fighter.id] = beat;
+      if (fighter.speed > .18) sound.step(fighter.id === 'player' ? .85 : .46);
+    }
+  }
+}
+
 function processEvents() {
   for (const event of game.drainEvents()) {
     renderer?.burst(event); sound.event(event);
-    if (event.type === 'hit') { hitstop = .04; if (event.actor === 'player') stats.hits++; }
-    if (event.type === 'deflect') { hitstop = .065; stats.deflects++; showMessage('PERFECT DEFLECT', 1); }
+    if (event.type === 'hit') {
+      hitstop = Math.max(hitstop, event.kind === 'light' ? .018 : .036);
+      if (event.actor === 'player') stats.hits++;
+    }
+    if (event.type === 'deflect') { hitstop = .048; stats.deflects++; showMessage('PERFECT DEFLECT', 1); }
     if (event.type === 'break') showMessage(event.actor === 'player' ? 'YOUR POSTURE IS BROKEN' : 'POSTURE BROKEN · STRIKE', 1.4);
     if (event.type === 'phase') showMessage('PHASE II · THE MASTER UNBOUND', 2.5);
     if (event.type === 'style') showMessage(STYLES[game.player.style].name.toUpperCase(), .8);
@@ -323,15 +350,20 @@ function readCombatInput() {
 }
 
 function frame(now) {
-  const dt = Math.min((now - lastFrame) / 1000, .05); lastFrame = now;
+  const wallTime = Math.max(0, (now - lastFrame) / 1000);
+  const dt = Math.min(wallTime, .08);
+  lastFrame = now;
+  if (!paused && !document.hidden) renderer?.trackFrameTime(wallTime);
   elapsed += dt;
   if (started && !paused && game.result === 'playing') {
-    if (hitstop > 0) hitstop -= dt;
-    else game.update(dt, readCombatInput());
+    const freeze = Math.min(dt, hitstop);
+    hitstop -= freeze;
+    game.update(dt - freeze, readCombatInput());
+    playFootsteps();
     processEvents(); updateHud();
     if (game.result !== 'playing' && !resultShown) showResult();
   }
-  if (elapsed > messageUntil) $('combat-message').classList.remove('visible');
+  if (messageUntil && elapsed > messageUntil) { $('combat-message').classList.remove('visible'); messageUntil = 0; }
   renderer?.render(game, paused ? 0 : dt, elapsed, locked);
   requestAnimationFrame(frame);
 }
@@ -347,7 +379,7 @@ requestAnimationFrame(frame);
 
 // Read-only QA snapshot: tests observe the same model used by the live game.
 Object.defineProperty(window, '__THOUSAND_FORMS__', { value: {
-  snapshot: () => ({ started, paused, locked, camera: renderer?.cameraSnapshot(game), cameraLookPointer: cameraLookPointer?.id ?? null,
+  snapshot: () => ({ started, paused, locked, renderStats: renderer?.stats(), camera: renderer?.cameraSnapshot(game), cameraLookPointer: cameraLookPointer?.id ?? null,
     fullscreen: appShell.active(), keys: [...keys], joystick: { ...joystick },
     joystickPointer, touchGuard: touchGuard?.id ?? null, mode: game.mode, result: game.result, phase: game.phase,
     player: { ...game.player }, enemy: { ...game.enemy }, time: game.time }),

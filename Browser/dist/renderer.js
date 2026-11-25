@@ -1,4 +1,7 @@
 import * as THREE from './vendor/three.module.js';
+import { buildSanctuary } from './sanctuary.js';
+import { createFighterMotion, updateFighterMotion } from './fighter-motion.js';
+import { batchFighter } from './rig-batches.js';
 
 // Procedural, asset-free presentation for the browser combat experiment.
 const TAU = Math.PI * 2;
@@ -8,15 +11,30 @@ const ease = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
 
 export function createRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  let renderScale = 1, slowTime = 0, fastTime = 0;
+  function fitResolution() {
+    const native = Math.min(window.devicePixelRatio || 1, 1.75, Math.sqrt(2400000 / (width * height)));
+    renderer.setPixelRatio(native * renderScale);
+  }
+  // The HUD stays at device resolution. Only the 3D canvas scales under sustained load.
+  function trackFrameTime(seconds) {
+    if (seconds <= 0 || seconds > 1) { slowTime = fastTime = 0; return; }
+    slowTime = seconds > .026 ? slowTime + seconds : Math.max(0, slowTime - seconds * 2);
+    fastTime = seconds < .0185 ? fastTime + seconds : 0;
+    if ((slowTime >= 1.6 && renderScale > .65) || (fastTime >= 6 && renderScale < 1)) {
+      renderScale = clamp(renderScale + (slowTime >= 1.6 ? -.15 : .1), .65, 1);
+      slowTime = fastTime = 0;
+      fitResolution();
+    }
+  }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.26;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b121a);
-  scene.fog = new THREE.FogExp2(0x0b121a, 0.019);
+  scene.background = new THREE.Color(0x15202d);
+  scene.fog = new THREE.FogExp2(0x263a4a, 0.026);
   const camera = new THREE.PerspectiveCamera(58, 1, .08, 110);
   const cameraTarget = new THREE.Vector3(0, 1.15, 2.25);
   const framedTarget = cameraTarget.clone();
@@ -75,9 +93,6 @@ export function createRenderer(canvas) {
   const blackStone = material(0x202a30);
   const brass = material(0xb89a62, { roughness: .54, metalness: .48 });
   const inscription = material(0x9d865b, { roughness: .7, metalness: .22 });
-  const wood = material(0x272a29);
-  const deepWood = material(0x182024);
-  const emberMaterial = basic(0xffbc66, { transparent: true, opacity: .85 });
   const flameCore = basic(0xffe5a3);
   const flameOuter = basic(0xed7333, { transparent: true, opacity: .62, depthWrite: false, blending: THREE.AdditiveBlending });
 
@@ -103,8 +118,8 @@ export function createRenderer(canvas) {
     });
   }
 
-  scene.add(new THREE.HemisphereLight(0xa7c2d3, 0x49392a, 1.95));
-  const moonLight = new THREE.DirectionalLight(0xb6d5ee, 2.35);
+  scene.add(new THREE.HemisphereLight(0xa9bfd6, 0x4c3e30, 1.85));
+  const moonLight = new THREE.DirectionalLight(0xb9d1ea, 2.45);
   moonLight.position.set(-8, 16, -12);
   moonLight.castShadow = true;
   moonLight.shadow.mapSize.set(1024, 1024);
@@ -112,7 +127,7 @@ export function createRenderer(canvas) {
   moonLight.shadow.bias = -.0008;
   moonLight.shadow.normalBias = .035;
   scene.add(moonLight);
-  const warmFill = new THREE.DirectionalLight(0xe6b67d, .95);
+  const warmFill = new THREE.DirectionalLight(0xe6bd8b, .88);
   warmFill.position.set(7, 5, 10);
   scene.add(warmFill);
 
@@ -169,79 +184,9 @@ export function createRenderer(canvas) {
   ownedMaterials.add(crackMat);
   scene.add(new THREE.LineSegments(crackGeometry, crackMat));
 
-  function pillar(x, z, h, angle = 0, damaged = false) {
-    const group = new THREE.Group();
-    group.position.set(x, 0, z);
-    group.rotation.y = angle;
-    mesh(group, box, stone[1], [0, .15, 0], [.95, .3, .95]);
-    mesh(group, box, edgeStone, [0, .38, 0], [.72, .18, .72]);
-    const count = Math.ceil(h / .62);
-    for (let j = 0; j < count; j++) {
-      const shaft = mesh(group, tapered, stone[j % stone.length], [0, .53 + j * .58, 0], [.3, .58, .3]);
-      shaft.rotation.y = j * .04;
-      if (damaged && j === count - 1) shaft.rotation.z = .12;
-    }
-    if (!damaged) {
-      const top = .52 + count * .58;
-      mesh(group, box, edgeStone, [0, top, 0], [.7, .18, .7]);
-      mesh(group, box, stone[1], [0, top + .15, 0], [.9, .18, .9]);
-      mesh(group, box, brass, [0, top + .27, 0], [.73, .06, .73]);
-    }
-    scene.add(group);
-    return group;
-  }
-  [-1.08, -.63, -.23, .22, .68, 1.12, 1.68, 2.55].forEach((angle, i) => {
-    pillar(Math.sin(angle) * 10.25, -Math.cos(angle) * 10.25, i % 3 === 0 ? 2.1 : 3.4, angle, i % 3 === 0);
+  const { moonHalo } = buildSanctuary({
+    scene, geometry, material, basic, mesh, terrainMaterials: stone,
   });
-  for (let i = 0; i < 18; i++) {
-    const a = random() * TAU, r = 10.3 + random() * 1.8;
-    const rubble = mesh(scene, box, stone[i % stone.length], [Math.sin(a) * r, -.1 + random() * .16, Math.cos(a) * r], [.25 + random() * .6, .22 + random() * .35, .25 + random() * .5]);
-    rubble.rotation.set(random() * .3, random() * TAU, random() * .4);
-  }
-  // Broken ceremonial gate and a quiet, layered monastery silhouette.
-  const gate = new THREE.Group();
-  gate.position.set(0, 0, -10.8);
-  [-3.0, 3.0].forEach(x => {
-    mesh(gate, box, edgeStone, [x, 2.3, 0], [.8, 4.6, .85]);
-    mesh(gate, box, brass, [x, 1.0, .01], [.84, .08, .9]);
-    mesh(gate, box, brass, [x, 4.25, .01], [.84, .09, .9]);
-    mesh(gate, box, stone[2], [x, .2, 0], [1.25, .4, 1.25]);
-  });
-  mesh(gate, box, stone[2], [0, 4.64, 0], [7.1, .68, 1.12]);
-  mesh(gate, box, brass, [0, 4.98, .08], [7.45, .06, 1.3]);
-  mesh(gate, box, deepWood, [0, 5.18, 0], [8.1, .3, 1.7]);
-  [-1, 1].forEach(sign => {
-    const tip = mesh(gate, box, deepWood, [sign * 4.1, 5.35, 0], [1.0, .24, 1.7]);
-    tip.rotation.z = sign * .25;
-  });
-  mesh(gate, box, blackStone, [0, 4.6, .59], [2.0, .44, .08]);
-  for (let i = 0; i < 4; i++) {
-    mesh(gate, box, brass, [-.57 + i * .38, 4.63, .644], [.045, .22, .015], false);
-  }
-  scene.add(gate);
-  const silhouette = material(0x111d26, { roughness: 1 });
-  const temple = new THREE.Group();
-  temple.position.set(-.8, 0, -20);
-  [0, 1, 2].forEach(level => {
-    const y = 1.4 + level * 2.05;
-    mesh(temple, box, silhouette, [0, y, 0], [7.5 - level * 1.8, 1.85, 3.6 - level * .5], false);
-    mesh(temple, box, deepWood, [0, y + 1.02, 0], [10.2 - level * 2.1, .3, 5.0 - level * .7], false);
-    for (const sign of [-1, 1]) {
-      const tip = mesh(temple, box, deepWood, [sign * (4.8 - level * 1.0), y + 1.14, 0], [1.2, .24, 5.0 - level * .7], false);
-      tip.rotation.z = sign * .27;
-    }
-  });
-  mesh(temple, cylinder, brass, [0, 7.3, 0], [.07, 1.2, .07], false);
-  scene.add(temple);
-  const mountainGeo = geometry('mountain', () => new THREE.ConeGeometry(1, 1, 5));
-  for (let i = 0; i < 17; i++) {
-    const a = Math.PI * (.52 + i * .062);
-    const m = mesh(scene, mountainGeo, silhouette, [Math.cos(a) * 27, 2.5 + random() * 2, -18 - random() * 12], [5 + random() * 7, 8 + random() * 13, 4 + random() * 7], false);
-    m.rotation.y = random() * TAU;
-  }
-  const moon = mesh(scene, sphere, basic(0xd2d8c5), [-8, 11, -26], [1.45, 1.45, 1.45], false);
-  const moonHalo = mesh(scene, geometry('moonhalo', () => new THREE.RingGeometry(1.6, 1.64, 96)), basic(0x829293, { transparent: true, opacity: .2, side: THREE.DoubleSide }), [-8, 11, -26], [1, 1, 1], false);
-  moonHalo.quaternion.copy(camera.quaternion);
 
   function brazier(x, z, phase) {
     const group = new THREE.Group();
@@ -278,14 +223,18 @@ export function createRenderer(canvas) {
   const animatedFlames = new Set(flames.flatMap(flame => [flame.outer, flame.inner]));
   const staticBatches = new Map();
   scene.traverse(item => {
-    if (!item.isMesh || animatedFlames.has(item)) return;
+    if (!item.isMesh || animatedFlames.has(item) || item.userData.noStaticBatch) return;
     // Retain conservative collision volumes before meshes become instances.
     // Floor decoration and distant scenery are not camera obstructions.
     item.geometry.computeBoundingBox();
     const bounds = item.geometry.boundingBox.clone().applyMatrix4(item.matrixWorld);
     const center = bounds.getCenter(new THREE.Vector3());
-    if (bounds.max.y > .65 && bounds.min.y < 7 && Math.hypot(center.x, center.z) < 16) {
-      cameraObstacles.push(bounds.expandByScalar(.24));
+    if (!item.userData.noCameraCollision && bounds.max.y > .65 && bounds.min.y < 7 && Math.hypot(center.x, center.z) < 16) {
+      if (item.userData.cameraCollisionBoxes) {
+        for (const segment of item.userData.cameraCollisionBoxes) {
+          cameraObstacles.push(segment.clone().applyMatrix4(item.matrixWorld).expandByScalar(.24));
+        }
+      } else cameraObstacles.push(bounds.expandByScalar(.24));
     }
     const key = `${item.geometry.uuid}:${item.material.uuid}:${item.castShadow}:${item.receiveShadow}`;
     if (!staticBatches.has(key)) staticBatches.set(key, []);
@@ -311,63 +260,128 @@ export function createRenderer(canvas) {
     const pivot = new THREE.Group();
     pivot.position.set(x, y, z);
     parent.add(pivot);
-    mesh(pivot, tapered, clothMat, [0, -upperLength / 2, 0], [leg ? .135 : .087, upperLength, leg ? .135 : .087]);
+    const muscle = geometry('fighter-muscle', () => new THREE.LatheGeometry([
+      new THREE.Vector2(0, -.5), new THREE.Vector2(.65, -.47),
+      new THREE.Vector2(.94, -.27), new THREE.Vector2(1, .08),
+      new THREE.Vector2(.75, .43), new THREE.Vector2(0, .5),
+    ], 10));
+    mesh(pivot, muscle, clothMat, [0, -upperLength / 2, 0], [leg ? .126 : .088, upperLength, leg ? .118 : .082]);
     const joint = new THREE.Group();
     joint.position.y = -upperLength;
     pivot.add(joint);
-    mesh(joint, tapered, leg ? clothMat : skinMat, [0, -lowerLength / 2, 0], [leg ? .105 : .071, lowerLength, leg ? .105 : .071]);
-    for (let j = 0; j < 3; j++) {
-      mesh(joint, cylinder, wrapMat, [0, -lowerLength + .045 + j * .035, 0], [leg ? .109 : .079, .026, leg ? .109 : .079]);
+    mesh(joint, muscle, leg ? clothMat : skinMat, [0, -lowerLength / 2, 0], [leg ? .091 : .067, lowerLength, leg ? .093 : .067]);
+    // Broad wrapped cuffs read at gameplay distance; a few raised seams imply layers.
+    mesh(joint, tapered, wrapMat, [0, -lowerLength * .66, 0], [leg ? .098 : .075, lowerLength * .54, leg ? .098 : .075]);
+    for (const offset of [-.06, .035]) {
+      const seam = mesh(joint, cylinder, clothMat, [0, -lowerLength * .66 + offset, 0], [leg ? .100 : .077, .012, leg ? .100 : .077]);
+      seam.rotation.z = .08;
     }
-    if (leg) mesh(joint, box, clothMat, [0, -lowerLength + .005, .07], [.19, .105, .32]);
-    else mesh(joint, sphere, skinMat, [0, -lowerLength - .027, .025], [.088, .095, .09]);
-    return { pivot, joint };
+    const foot = new THREE.Group();
+    foot.position.y = -lowerLength;
+    joint.add(foot);
+    if (leg) {
+      mesh(foot, sphere, clothMat, [0, .007, .07], [.089, .065, .155]);
+      mesh(foot, box, wrapMat, [0, -.028, .08], [.17, .025, .27]);
+    } else {
+      mesh(foot, sphere, skinMat, [0, -.025, .013], [.067, .084, .067]);
+      mesh(foot, box, wrapMat, [0, -.004, .055], [.10, .09, .025]);
+    }
+    return { pivot, joint, foot };
   }
 
   function createFighter(id) {
     const enemy = id === 'enemy';
     const root = new THREE.Group();
-    const skin = material(enemy ? 0xa98a75 : 0xc69b72, { roughness: .78 });
-    const cloth = material(enemy ? 0x51414c : 0x36535b);
-    const trousers = material(enemy ? 0x38343e : 0x30434a);
-    const wrap = material(enemy ? 0x999588 : 0xe5d5b8, { roughness: 1 });
-    const belt = material(enemy ? 0x924e3d : STYLE_COLORS[0]);
-    const hair = material(enemy ? 0xa9aaa3 : 0x202727);
-    const eyes = basic(enemy ? 0xe9a563 : 0xe6d7b2);
+    const skin = material(enemy ? 0xa08a77 : 0xb58d69, { roughness: .72, metalness: 0 });
+    const cloth = material(enemy ? 0x41333c : 0x294348, { roughness: .96, metalness: 0 });
+    const clothLight = material(enemy ? 0x63595b : 0x56635e, { roughness: .98, metalness: 0 });
+    const trousers = material(enemy ? 0x28282e : 0x253337, { roughness: .94, metalness: 0 });
+    const wrap = material(enemy ? 0xb0a18a : 0xc9bba0, { roughness: 1, metalness: 0 });
+    const armor = material(enemy ? 0x615a49 : 0x5b655d, { roughness: .55, metalness: .55 });
+    const trim = material(enemy ? 0xb59a67 : 0xa58a52, { roughness: .55, metalness: .62 });
+    const belt = material(enemy ? 0x924e3d : STYLE_COLORS[0], { roughness: .88, metalness: .12 });
+    const hair = material(enemy ? 0x9d9c90 : 0x171e21, { roughness: .9 });
+    const eyes = basic(enemy ? 0xdca36a : 0x272b29);
+    const panelShape = geometry('fighter-tattered-panel', () => {
+      const shape = new THREE.Shape();
+      shape.moveTo(-.5, 0); shape.lineTo(.5, 0); shape.lineTo(.43, -.83);
+      shape.lineTo(.23, -.96); shape.lineTo(.13, -.84); shape.lineTo(-.08, -1);
+      shape.lineTo(-.22, -.89); shape.lineTo(-.43, -.96); shape.closePath();
+      const result = new THREE.ExtrudeGeometry(shape, { depth: .014, bevelEnabled: false });
+      result.translate(0, 0, -.007);
+      return result;
+    });
+    const clothPanel = (parent, mat, x, y, z, panelWidth, panelLength) => {
+      const hinge = new THREE.Group();
+      hinge.position.set(x, y, z); parent.add(hinge);
+      mesh(hinge, panelShape, mat, [0, 0, 0], [panelWidth, panelLength, 1]);
+      return hinge;
+    };
     const body = new THREE.Group();
     body.position.y = 1.05;
     root.add(body);
-    mesh(body, tapered, cloth, [0, .13, 0], [.285, .55, .195]);
-    const lapelLeft = mesh(body, box, wrap, [-.115, .16, .17], [.065, .48, .028]);
-    lapelLeft.rotation.z = -.18;
-    const lapelRight = mesh(body, box, cloth, [.105, .13, .18], [.12, .5, .035]);
-    lapelRight.rotation.z = .2;
-    mesh(body, cylinder, skin, [0, .45, 0], [.085, .13, .085]);
+    const torso = geometry('fighter-torso', () => new THREE.LatheGeometry([
+      new THREE.Vector2(0, -.21), new THREE.Vector2(.20, -.2), new THREE.Vector2(.225, -.08),
+      new THREE.Vector2(.29, .14), new THREE.Vector2(.315, .28),
+      new THREE.Vector2(.20, .39), new THREE.Vector2(0, .40),
+    ], 12));
+    mesh(body, torso, cloth, [0, 0, 0], [1, 1, .62]);
+    const lapelLeft = mesh(body, box, wrap, [-.065, .16, .175], [.06, .48, .026]);
+    lapelLeft.rotation.z = -.37;
+    const lapelRight = mesh(body, box, clothLight, [.075, .16, .185], [.10, .47, .032]);
+    lapelRight.rotation.z = .32;
+    // Split ceremonial layers and a carved back seal give the rear silhouette detail.
+    clothPanel(body, clothLight, 0, .32, -.18, .52, .54);
+    const backSeal = mesh(body, geometry('fighter-seal', () => new THREE.TorusGeometry(.074, .008, 5, 20)), trim, [0, .14, -.202], [1, 1.15, 1]);
+    mesh(body, box, trim, [0, .14, -.208], [.012, .13, .012]);
+    mesh(body, box, trim, [0, .14, -.208], [.11, .012, .012]);
+    mesh(body, cylinder, skin, [0, .445, 0], [.072, .12, .072]);
+    mesh(body, tapered, clothLight, [0, .39, -.035], [.135, .13, .13]);
+    const necklace = mesh(body, geometry('fighter-cord', () => new THREE.TorusGeometry(.115, .012, 5, 20, Math.PI)), trim, [0, .34, .163], [1, 1, 1]);
+    necklace.rotation.z = Math.PI;
+    mesh(body, octa, trim, [0, .2, .205], [.027, .055, .017]);
     const head = new THREE.Group();
     head.position.set(0, .59, 0);
     body.add(head);
-    mesh(head, sphere, skin, [0, .025, 0], [.165, .205, .154]);
-    mesh(head, sphere, hair, [0, .102, -.04], [.173, .145, .148]);
-    mesh(head, sphere, hair, [0, .235, -.055], [.08, .078, .075]);
-    mesh(head, box, cloth, [0, .055, .142], [.285, .055, .04]);
-    [-.07, .07].forEach(x => mesh(head, box, eyes, [x, .058, .164], [.042, .012, .008], false));
-    mesh(root, tapered, trousers, [0, .87, 0], [.255, .22, .185]);
-    mesh(root, cylinder, belt, [0, .96, 0], [.265, .095, .2]);
-    const sash = mesh(root, box, belt, [-.13, .69, .17], [.13, .49, .035]);
-    sash.rotation.z = -.14;
-    const sash2 = mesh(root, box, belt, [.095, .72, .17], [.09, .4, .03]);
-    sash2.rotation.z = .16;
-    const leftArm = limb(body, -.31, .34, 0, .29, .29, skin, cloth, wrap);
-    const rightArm = limb(body, .31, .34, 0, .29, .29, skin, cloth, wrap);
+    mesh(head, sphere, skin, [0, .024, 0], [.131, .175, .127]);
+    mesh(head, sphere, skin, [0, -.064, .025], [.105, .09, .105]);
+    mesh(head, sphere, hair, [0, .105, -.033], [.137, .12, .125]);
+    mesh(head, sphere, hair, [0, .205, -.058], [.057, .06, .06]);
+    mesh(head, cylinder, trim, [0, .192, -.058], [.058, .015, .061]);
+    mesh(head, box, enemy ? armor : cloth, [0, .074, .112], [.235, .032, .027]);
+    for (const sign of [-1, 1]) {
+      mesh(head, sphere, skin, [sign * .13, .015, -.005], [.022, .045, .024]);
+      mesh(head, box, eyes, [sign * .052, .05, .127], [.026, .009, .009], false);
+    }
+    mesh(head, octa, enemy ? armor : skin, [0, .012, .13], [.026, .048, .033]);
+    if (enemy) mesh(head, tapered, hair, [0, -.1, .055], [.075, .16, .065]);
+    mesh(root, tapered, trousers, [0, .87, 0], [.235, .22, .17]);
+    mesh(root, cylinder, belt, [0, .96, 0], [.245, .075, .188]);
+    mesh(root, box, trim, [0, .96, .195], [.105, .085, .028]);
+    const sash = clothPanel(root, enemy ? wrap : belt, -.11, .93, .176, .14, .53);
+    const sash2 = clothPanel(root, clothLight, .11, .93, .175, .10, .44);
+    const coatLeft = clothPanel(root, cloth, -.12, .94, -.16, .24, .56);
+    const coatRight = clothPanel(root, clothLight, .12, .94, -.16, .22, .50);
+    const leftArm = limb(body, -.315, .33, 0, .29, .29, skin, cloth, wrap);
+    const rightArm = limb(body, .315, .33, 0, .29, .29, skin, cloth, wrap);
     const leftLeg = limb(root, -.15, .87, 0, .37, .38, skin, trousers, wrap, true);
     const rightLeg = limb(root, .15, .87, 0, .37, .38, skin, trousers, wrap, true);
+    // Unequal shoulder protection keeps the unarmed silhouette readable from behind.
+    mesh(leftArm.pivot, sphere, armor, [0, -.04, -.008], [.127, .12, .13]);
+    mesh(leftArm.pivot, box, trim, [0, -.09, -.126], [.15, .025, .018]);
+    mesh(rightArm.pivot, geometryCache.get('fighter-muscle'), clothLight, [0, -.12, 0], [.098, .23, .09]);
+    for (const arm of [leftArm, rightArm]) {
+      mesh(arm.joint, box, armor, [0, -.16, -.065], [.09, .15, .027]);
+      mesh(arm.joint, box, trim, [0, -.16, -.083], [.015, .115, .01]);
+    }
     const mantle = new THREE.Group();
     [-1, 1].forEach(sign => {
-      const shoulder = mesh(mantle, tapered, blackStone, [sign * .28, .38, -.045], [.14, .16, .21]);
+      const shoulder = mesh(mantle, tapered, armor, [sign * .28, .38, -.045], [.17, .15, .22]);
       shoulder.rotation.z = sign * .45;
-      const spike = mesh(mantle, octa, brass, [sign * .3, .52, -.08], [.055, .24, .06]);
+      const spike = mesh(mantle, octa, trim, [sign * .32, .51, -.08], [.045, .19, .055]);
       spike.rotation.z = sign * -.4;
     });
+    mesh(mantle, tapered, armor, [0, .39, -.105], [.18, .25, .14]);
     body.add(mantle);
     mantle.visible = false;
     scene.add(root);
@@ -401,10 +415,14 @@ export function createRenderer(canvas) {
     const arc = new THREE.Line(arcGeo, arcMat);
     arc.position.y = .075;
     scene.add(arc);
-    return { root, body, head, leftArm, rightArm, leftLeg, rightLeg, sash, sash2, belt, footMat, footprint, shadow, indicator, healthFill, cone, coneGeo, coneMat, conePositions, arc, arcGeo, arcMat, arcPositions, mantle, lastX: null, lastZ: null, walkPhase: 0, attackIndex: 0, oldState: null, modeScale: 1 };
+    return { root, body, head, leftArm, rightArm, leftLeg, rightLeg, sash, sash2, coatLeft, coatRight,
+      belt, skin, cloth, armor, footMat, footprint, shadow, indicator, healthFill, cone, coneGeo, coneMat,
+      conePositions, arc, arcGeo, arcMat, arcPositions, mantle, motion: createFighterMotion(),
+      walkPhase: 0 };
   }
   fighters.player = createFighter('player');
   fighters.enemy = createFighter('enemy');
+  const rigBatches = Object.values(fighters).map(fighter => batchFighter(scene, fighter.root));
 
   const particleCount = 180;
   const particlePositions = new Float32Array(particleCount * 3).fill(-99);
@@ -415,7 +433,9 @@ export function createRenderer(canvas) {
     .setAttribute('color', new THREE.BufferAttribute(particleColors, 3)));
   const particleMat = new THREE.PointsMaterial({ size: .065, vertexColors: true, transparent: true, opacity: .95, depthWrite: false, blending: THREE.AdditiveBlending });
   ownedMaterials.add(particleMat);
-  scene.add(new THREE.Points(particleGeo, particleMat));
+  const impactSparks = new THREE.Points(particleGeo, particleMat);
+  impactSparks.frustumCulled = false;
+  scene.add(impactSparks);
   const waves = Array.from({ length: 8 }, () => {
     const mat = basic(0xffd896, { transparent: true, opacity: 0, depthWrite: false });
     const item = ring(scene, 1, .018, mat, .08, 64);
@@ -428,19 +448,23 @@ export function createRenderer(canvas) {
     if (!event || !Number.isFinite(event.x) || !Number.isFinite(event.z)) return;
     const type = event.type;
     if (!['hit', 'block', 'deflect', 'break', 'style', 'phase', 'win', 'evade', 'strike'].includes(type)) return;
+    const heavy = event.kind === 'heavy' || event.kind === 'hybrid' || event.damage >= 20;
+    const actor = fighters[event.actor];
+    const impactYaw = actor ? actor.root.rotation.y : 0;
     const color = new THREE.Color(type === 'deflect' ? 0xd8f6ff : type === 'style' ? STYLE_COLORS[event.style ?? 0] : type === 'break' || type === 'phase' ? 0xe97a4e : 0xffce84);
-    const count = type === 'strike' || type === 'evade' ? 5 : type === 'deflect' || type === 'break' ? 28 : type === 'win' ? 48 : 14;
+    const count = type === 'strike' ? 0 : type === 'evade' ? 5 : type === 'deflect' || type === 'break' ? 28 : type === 'win' ? 48 : heavy ? 20 : 9;
     for (let n = 0; n < count; n++) {
       const i = particleCursor++ % particleCount;
       const p = particleState[i];
-      const a = random() * TAU;
-      const speed = .8 + random() * 2.8;
+      const a = type === 'hit' ? impactYaw + (random() - .5) * 2.6 : random() * TAU;
+      const speed = (heavy ? 1.4 : .7) + random() * 2.5;
       p.life = p.duration = .22 + random() * .42;
       p.vx = Math.sin(a) * speed; p.vz = Math.cos(a) * speed; p.vy = 1.2 + random() * 2.2;
       p.r = color.r; p.g = color.g; p.b = color.b;
-      particlePositions[i * 3] = event.x;
+      const contact = type === 'hit' ? -.28 : 0;
+      particlePositions[i * 3] = event.x + Math.sin(impactYaw) * contact;
       particlePositions[i * 3 + 1] = type === 'style' || type === 'evade' ? .1 : .8 + random() * .35;
-      particlePositions[i * 3 + 2] = event.z;
+      particlePositions[i * 3 + 2] = event.z + Math.cos(impactYaw) * contact;
     }
     if (['deflect', 'break', 'style', 'phase', 'win'].includes(type)) {
       const wave = waves[waveCursor++ % waves.length];
@@ -460,26 +484,30 @@ export function createRenderer(canvas) {
     if (!show) return;
     const radius = attack.range || 1.7;
     const arc = clamp(attack.arc || 1.4, .1, TAU);
-    for (let i = 0; i < 40; i++) {
-      const a = -arc / 2 + arc * i / 40;
-      const b = -arc / 2 + arc * (i + 1) / 40;
-      const k = i * 9;
-      rig.conePositions[k] = 0; rig.conePositions[k + 1] = 0; rig.conePositions[k + 2] = 0;
-      rig.conePositions[k + 3] = Math.sin(a) * radius; rig.conePositions[k + 4] = 0; rig.conePositions[k + 5] = Math.cos(a) * radius;
-      rig.conePositions[k + 6] = Math.sin(b) * radius; rig.conePositions[k + 7] = 0; rig.conePositions[k + 8] = Math.cos(b) * radius;
+    if (rig.tellRadius !== radius || rig.tellArc !== arc) {
+      rig.tellRadius = radius;
+      rig.tellArc = arc;
+      for (let i = 0; i < 40; i++) {
+        const a = -arc / 2 + arc * i / 40;
+        const b = -arc / 2 + arc * (i + 1) / 40;
+        const k = i * 9;
+        rig.conePositions[k] = 0; rig.conePositions[k + 1] = 0; rig.conePositions[k + 2] = 0;
+        rig.conePositions[k + 3] = Math.sin(a) * radius; rig.conePositions[k + 4] = 0; rig.conePositions[k + 5] = Math.cos(a) * radius;
+        rig.conePositions[k + 6] = Math.sin(b) * radius; rig.conePositions[k + 7] = 0; rig.conePositions[k + 8] = Math.cos(b) * radius;
+      }
+      rig.arcPositions[0] = 0; rig.arcPositions[1] = 0; rig.arcPositions[2] = 0;
+      for (let i = 0; i <= 40; i++) {
+        const a = -arc / 2 + arc * i / 40;
+        rig.arcPositions[(i + 1) * 3] = Math.sin(a) * radius;
+        rig.arcPositions[(i + 1) * 3 + 1] = 0;
+        rig.arcPositions[(i + 1) * 3 + 2] = Math.cos(a) * radius;
+      }
+      rig.arcPositions[126] = rig.arcPositions[127] = rig.arcPositions[128] = 0;
+      rig.coneGeo.attributes.position.needsUpdate = true;
+      rig.arcGeo.attributes.position.needsUpdate = true;
+      rig.coneGeo.computeBoundingSphere();
+      rig.arcGeo.computeBoundingSphere();
     }
-    rig.arcPositions[0] = 0; rig.arcPositions[1] = 0; rig.arcPositions[2] = 0;
-    for (let i = 0; i <= 40; i++) {
-      const a = -arc / 2 + arc * i / 40;
-      rig.arcPositions[(i + 1) * 3] = Math.sin(a) * radius;
-      rig.arcPositions[(i + 1) * 3 + 1] = 0;
-      rig.arcPositions[(i + 1) * 3 + 2] = Math.cos(a) * radius;
-    }
-    rig.arcPositions[126] = rig.arcPositions[127] = rig.arcPositions[128] = 0;
-    rig.coneGeo.attributes.position.needsUpdate = true;
-    rig.arcGeo.attributes.position.needsUpdate = true;
-    rig.coneGeo.computeBoundingSphere();
-    rig.arcGeo.computeBoundingSphere();
     rig.cone.position.set(fighter.x, .063, fighter.z);
     rig.arc.position.set(fighter.x, .078, fighter.z);
     rig.cone.rotation.y = rig.arc.rotation.y = fighter.yaw || 0;
@@ -495,107 +523,38 @@ export function createRenderer(canvas) {
     const state = String(f.state || 'idle').toLowerCase();
     const style = clamp(f.style || 0, 0, 2);
     const targetScale = enemy && mode === 'boss' ? 1.15 : 1;
-    rig.modeScale = targetScale;
     rig.root.scale.setScalar(targetScale);
     rig.mantle.visible = enemy && mode === 'boss';
     rig.belt.color.setHex(enemy ? mode === 'boss' ? 0xa8543c : 0x81918d : STYLE_COLORS[style]);
     rig.footMat.color.setHex(f.invulnerable ? 0xe0f4e8 : enemy ? 0xdd8968 : STYLE_COLORS[style]);
-    const dx = rig.lastX == null ? 0 : f.x - rig.lastX;
-    const dz = rig.lastZ == null ? 0 : f.z - rig.lastZ;
-    const speed = dt > 0 ? Math.min(Math.hypot(dx, dz) / dt, 8) : 0;
-    rig.lastX = f.x; rig.lastZ = f.z;
-    rig.walkPhase += Math.min(speed, 5) * dt * 5.2;
-    if (state === 'windup' && rig.oldState !== state) rig.attackIndex++;
-    rig.oldState = state;
-    const moving = state === 'idle' && speed > .15;
-    const gait = Math.sin(rig.walkPhase);
-    const p = { la: .16, ra: .18, laz: .15, raz: -.15, le: -1.5, re: -1.45, ll: -.10, rl: .10, llz: .06, rlz: -.06, lk: .12, rk: .12, bx: 0, by: 0, bz: 0, rootY: 0, lean: 0, fall: 0 };
-    if (style === 1) { p.la = -.3; p.ra = -.05; p.le = -1.3; p.re = -1.7; p.by = -.12; }
-    if (style === 2) { p.la = .25; p.ra = -.15; p.le = -1.25; p.re = -1.4; p.ll = -.25; p.rl = .19; p.by = -.22; p.laz = .25; }
-    if (moving) {
-      p.ll = gait * .55; p.rl = -gait * .55;
-      p.lk = .16 + Math.max(0, -gait) * .55;
-      p.rk = .16 + Math.max(0, gait) * .55;
-      p.la += -gait * .15; p.ra += gait * .15;
-      p.rootY = Math.abs(Math.cos(rig.walkPhase)) * .035;
-      p.bx = .07;
-    }
-    if (['windup', 'active', 'recovery'].includes(state) && f.attack) {
-      const attack = f.attack;
-      const windup = state === 'windup' ? ease((f.stateTime || 0) / (f.stateDuration || attack.windup || .2)) : 1;
-      const recovery = state === 'recovery' ? 1 - ease((f.stateTime || 0) / (f.stateDuration || attack.recovery || .3)) : 1;
-      const strike = state === 'windup' ? 0 : recovery;
-      const load = windup * recovery;
-      const attackStyle = attack.style ?? style;
-      const heavy = attack.kind !== 'light';
-      p.by = -.3 * load + .65 * strike;
-      p.bx = .08 * strike;
-      if (attackStyle === 2 || attack.sweep) {
-        p.rl = -1.0 * load - .50 * strike;
-        p.rk = 1.45 * load - 1.35 * strike;
-        p.rlz = heavy ? -.65 * strike : -.07;
-        p.bx = -.22 * load;
-        p.la = -.3; p.ra = .5; p.laz = .5 * load; p.raz = -.6 * load;
-        p.le = -.7; p.re = -.8;
-        p.by = heavy ? -.7 * load + 1.3 * strike : -.13;
-        p.lk = .22;
-        p.rootY = .05 * strike;
-      } else if (attackStyle === 0 && heavy) {
-        p.rl = -.25 - .95 * strike;
-        p.rk = .35 + 1.55 * load;
-        p.la = -.5 * load; p.ra = -.65 * load;
-        p.le = -1.6 + .7 * strike; p.re = -1.6 + .7 * strike;
-        p.bx = -.1 + .2 * strike;
-        p.rootY = .04 * strike;
-      } else {
-        const left = attackStyle === 1 && rig.attackIndex % 2 === 0;
-        const shoulder = .25 * load - 1.8 * strike;
-        const elbow = -1.65 * load + 1.58 * strike;
-        if (left) { p.la = shoulder; p.le = elbow; p.laz = -.06; }
-        else { p.ra = shoulder; p.re = elbow; p.raz = .06; }
-        if (attackStyle === 1 && heavy) { p.la = shoulder; p.le = elbow; p.laz = .02; }
-        p.ll = -.26 * strike; p.rl = .22 * strike;
-        p.lean = .08 * strike;
-      }
-    }
-    if (state === 'guard' || state === 'guarding') {
-      p.la = p.ra = -.45; p.le = p.re = -1.95;
-      p.laz = -.17; p.raz = .17; p.bx = .06; p.lk = p.rk = .22;
-    }
-    if (state === 'evade' || state === 'evading') {
-      p.rootY = -.26; p.bx = .48;
-      p.ll = -.55; p.rl = -.9; p.lk = 1.25; p.rk = 1.45;
-      p.la = -.7; p.ra = -.8; p.le = p.re = -.7;
-    }
-    if (state === 'switch' || state === 'switching') {
-      const q = ease((f.stateTime || 0) / (f.stateDuration || .22));
-      p.by = Math.sin(q * Math.PI) * .55;
-      p.la = -.7; p.ra = -.7; p.le = -1.35; p.re = -1.35;
-    }
-    if (state === 'stun' || state === 'hitstun') {
-      p.bx = -.25; p.bz = Math.sin(elapsed * 30) * .055; p.la = .3; p.ra = .4; p.le = -.5; p.re = -.4;
-      p.rootY = -.055;
-    }
-    if (state === 'broken' || state === 'posturebroken') {
-      p.rootY = -.35; p.bx = .48; p.ll = p.rl = -.6; p.lk = p.rk = 1.4;
-      p.la = .15; p.ra = .2; p.le = p.re = -.3;
-    }
-    if (state === 'dead') { p.fall = 1.45; p.rootY = .12; p.la = -.6; p.ra = .3; p.le = -.2; p.re = -.3; p.ll = .2; p.rl = -.3; p.lk = .3; p.rk = .4; }
-    const blend = 1 - Math.exp(-dt * (state === 'active' ? 40 : 19));
-    const damp = (obj, key, value) => { obj[key] += (value - obj[key]) * blend; };
-    const breathe = state === 'idle' ? Math.sin(elapsed * 2.5 + (enemy ? 1.5 : 0)) * .009 : 0;
-    rig.root.position.set(f.x + Math.sin(f.yaw || 0) * p.lean, p.rootY + breathe, f.z + Math.cos(f.yaw || 0) * p.lean);
-    rig.root.rotation.y = f.yaw || 0;
-    damp(rig.root.rotation, 'z', p.fall);
-    damp(rig.body.rotation, 'x', p.bx); damp(rig.body.rotation, 'y', p.by); damp(rig.body.rotation, 'z', p.bz);
-    damp(rig.leftArm.pivot.rotation, 'x', p.la); damp(rig.rightArm.pivot.rotation, 'x', p.ra);
-    damp(rig.leftArm.pivot.rotation, 'z', p.laz); damp(rig.rightArm.pivot.rotation, 'z', p.raz);
-    damp(rig.leftArm.joint.rotation, 'x', p.le); damp(rig.rightArm.joint.rotation, 'x', p.re);
-    damp(rig.leftLeg.pivot.rotation, 'x', p.ll); damp(rig.rightLeg.pivot.rotation, 'x', p.rl);
-    damp(rig.leftLeg.pivot.rotation, 'z', p.llz); damp(rig.rightLeg.pivot.rotation, 'z', p.rlz);
-    damp(rig.leftLeg.joint.rotation, 'x', p.lk); damp(rig.rightLeg.joint.rotation, 'x', p.rk);
-    rig.sash.rotation.x = Math.sin(elapsed * 4 + rig.walkPhase) * (.04 + speed * .035);
-    rig.sash2.rotation.x = -Math.sin(elapsed * 3.4 + rig.walkPhase) * (.035 + speed * .03);
+    const p = updateFighterMotion(rig.motion, f, dt, elapsed, enemy);
+    const time = rig.motion.stanceTime;
+    const speed = rig.motion.speed;
+    rig.walkPhase = rig.motion.phase;
+    const forwardX = Math.sin(f.yaw || 0), forwardZ = Math.cos(f.yaw || 0);
+    rig.root.position.set(f.x + forwardX * p.lean + forwardZ * p.sway, p.rootY,
+      f.z + forwardZ * p.lean - forwardX * p.sway);
+    rig.root.rotation.set(0, f.yaw || 0, p.fall);
+    rig.body.rotation.set(p.bx, p.by, p.bz);
+    rig.head.rotation.set(p.hx, p.hy, p.hz);
+    rig.leftArm.pivot.rotation.set(p.la, p.lay, p.laz);
+    rig.rightArm.pivot.rotation.set(p.ra, p.ray, p.raz);
+    rig.leftArm.joint.rotation.x = p.le; rig.rightArm.joint.rotation.x = p.re;
+    rig.leftLeg.pivot.rotation.set(p.ll, 0, p.llz);
+    rig.rightLeg.pivot.rotation.set(p.rl, 0, p.rlz);
+    rig.leftLeg.joint.rotation.x = p.lk; rig.rightLeg.joint.rotation.x = p.rk;
+    rig.leftLeg.foot.rotation.x = p.lf; rig.rightLeg.foot.rotation.x = p.rf;
+    // Inertial cloth is bounded and deterministic; there is no per-frame mesh work.
+    rig.sash.rotation.set(Math.sin(time * 3.2 + rig.walkPhase) * .035 - speed * .025,
+      p.by * .10, -.12 + Math.sin(rig.walkPhase) * Math.min(speed, 4) * .014);
+    rig.sash2.rotation.set(-Math.sin(time * 2.8 + rig.walkPhase) * .03 - speed * .018,
+      -p.by * .08, .12 - Math.sin(rig.walkPhase) * Math.min(speed, 4) * .012);
+    rig.coatLeft.rotation.set(.045 + speed * .032 + Math.max(0, p.ll) * .18,
+      p.by * .12, -.035 + p.bz * .2);
+    rig.coatRight.rotation.set(.035 + speed * .028 + Math.max(0, p.rl) * .18,
+      -p.by * .1, .035 + p.bz * .2);
+    rig.cloth.emissive.setRGB(rig.motion.impact * .12, rig.motion.impact * .035, rig.motion.impact * .015);
+    rig.skin.emissive.setRGB(rig.motion.impact * .055, rig.motion.impact * .018, 0);
     rig.footprint.position.set(f.x, 0, f.z);
     rig.footprint.rotation.y = f.yaw || 0;
     rig.footMat.opacity = state === 'dead' ? .2 : .65;
@@ -747,6 +706,7 @@ export function createRenderer(canvas) {
   function resize() {
     const rect = canvas.getBoundingClientRect();
     width = Math.max(1, rect.width); height = Math.max(1, rect.height);
+    fitResolution();
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.fov = camera.aspect < .85 ? 66 : camera.aspect < 1.2 ? 62 : 58;
@@ -757,14 +717,20 @@ export function createRenderer(canvas) {
     dt = clamp(dt || 0, 0, .1);
     elapsed = Number.isFinite(elapsed) ? elapsed : game.elapsed || 0;
     if (lastMode !== game.mode || (previousResult && previousResult !== 'playing' && game.result === 'playing')) {
-      for (const rig of Object.values(fighters)) { rig.lastX = null; rig.lastZ = null; rig.root.rotation.z = 0; }
       lastMode = game.mode;
       resetCamera(game);
     }
     previousResult = game.result;
+    // Leave the left side of the menu for the encounter selector. Combat is centered.
+    const menuOffset = !game.presentationPlaying && camera.aspect > 1.25 ? -Math.min(10, camera.aspect * 5) : 0;
+    if (camera.filmOffset !== menuOffset) {
+      camera.filmOffset = menuOffset;
+      camera.updateProjectionMatrix();
+    }
     updateCamera(game, dt, locked);
     updateFighter(fighters.player, game.player, dt, elapsed, false, game.mode);
     updateFighter(fighters.enemy, game.enemy, dt, elapsed, true, game.mode);
+    for (const batch of rigBatches) batch.sync();
     flames.forEach(flame => {
       const pulse = 1 + Math.sin(elapsed * 8.5 + flame.phase) * .12 + Math.sin(elapsed * 17 + flame.phase) * .05;
       flame.outer.scale.set(.23 * (2 - pulse), .52 * pulse, .23 * (2 - pulse));
@@ -793,7 +759,7 @@ export function createRenderer(canvas) {
     }
     particleGeo.attributes.position.needsUpdate = true;
     particleGeo.attributes.color.needsUpdate = true;
-    particleGeo.boundingSphere = null;
+
     for (const wave of waves) {
       if (wave.life <= 0) { wave.item.visible = false; continue; }
       wave.life -= dt;
@@ -805,6 +771,7 @@ export function createRenderer(canvas) {
   }
 
   function dispose() {
+    for (const batch of rigBatches) batch.dispose();
     staticInstances.forEach(item => item.dispose());
     geometryCache.forEach(geo => geo.dispose());
     ownedMaterials.forEach(mat => mat.dispose());
@@ -813,6 +780,6 @@ export function createRenderer(canvas) {
     renderer.dispose();
   }
   resize();
-  const stats = () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, staticBatches: staticInstances.length });
-  return { render, resize, burst, dispose, stats, resetCamera, orbit, movementBasis, cameraSnapshot };
+  const stats = () => ({ renderScale, pixelRatio: renderer.getPixelRatio(), calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, staticBatches: staticInstances.length });
+  return { render, resize, burst, dispose, stats, resetCamera, orbit, movementBasis, cameraSnapshot, trackFrameTime };
 }

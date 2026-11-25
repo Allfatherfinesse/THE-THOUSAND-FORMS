@@ -2,10 +2,10 @@
 
 :root {
   color-scheme: dark;
-  --ink: #111714;
-  --paper: #ece7d9;
-  --muted: #a6aa9a;
-  --copper: #c09a69;
+  --ink: #121218;
+  --paper: #f2e7d1;
+  --muted: #c0b5a4;
+  --copper: #d8b776;
   --vermillion: #b34c37;
   --line: rgba(226, 219, 195, .19);
   --panel: rgba(15, 22, 18, .68);
@@ -52,7 +52,7 @@ body.is-playing .play-only { display: grid; }
 body.is-playing .brand { visibility: hidden; }
 body.is-playing .experiment-badge { display: none; }
 
-.start-overlay { position: absolute; inset: 0; z-index: 10; background: linear-gradient(90deg, rgba(11, 18, 14, .94) 0%, rgba(11, 18, 14, .82) 24%, rgba(11, 18, 14, .42) 46%, rgba(11, 18, 14, .02) 75%); overflow-y: auto; }
+.start-overlay { position: absolute; inset: 0; z-index: 10; background: linear-gradient(90deg, rgba(12,11,18,.97) 0%, rgba(13,12,18,.87) 25%, rgba(16,13,21,.32) 53%, transparent 77%); overflow-y: auto; }
 .start-content { position: relative; width: min(490px, 44vw); margin-left: 8.1vw; padding-top: clamp(122px, 17vh, 190px); padding-bottom: 110px; }
 .location-label { display: flex; align-items: center; gap: 13px; margin-bottom: 26px; font-size: 9px; font-weight: 500; letter-spacing: .22em; color: var(--copper); }
 .label-rule { display: block; height: 1px; width: 31px; background: var(--copper); opacity: .72; }
@@ -98,7 +98,7 @@ body.is-playing .combat-hud { opacity: 1; visibility: visible; }
 .meter-label > span + span { color: #d4d8c9; font-size: 8px; font-variant-numeric: tabular-nums; }
 .meter-track { height: 3px; background: rgba(214, 217, 192, .13); overflow: hidden; }
 .health-track { height: 5px; }
-.meter-fill { display: block; height: 100%; max-width: 100%; transform-origin: left; transition: width .11s linear; }
+.meter-fill { display: block; height: 100%; max-width: 100%; transform-origin: left; transition: transform .09s linear; }
 .health-fill { background: linear-gradient(90deg, #c5b28c, #e5dbb6); }
 .stamina-fill { background: #8baf90; }
 .posture-fill { background: var(--copper); }
@@ -134,8 +134,8 @@ body.is-playing .combat-hud { opacity: 1; visibility: visible; }
 .action-legend b { font-weight: 400; color: #c6cbb7; margin-left: 5px; font-size: 8px; }
 .action-legend p > span { margin: 0 9px; opacity: .4; }
 
-.modal-overlay { position: absolute; inset: 0; display: grid; place-items: center; z-index: 25; padding: 30px; background: rgba(9, 17, 11, .77); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.result-card { width: min(100%, 420px); text-align: center; padding: 39px 38px 30px; border-top: 1px solid var(--copper); border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(29, 39, 26, .54), rgba(14, 23, 15, .54)); }
+.modal-overlay { position: absolute; inset: 0; display: grid; place-items: center; z-index: 25; padding: 30px; background: rgba(10, 9, 16, .77); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.result-card { width: min(100%, 420px); text-align: center; padding: 39px 38px 30px; border-top: 1px solid var(--copper); border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(49, 43, 42, .80), rgba(20, 17, 25, .80)); }
 .small-seal { display: grid; place-items: center; width: 37px; height: 37px; border: 1px solid var(--vermillion); color: #c47757; margin: 0 auto 24px; font-family: Georgia, serif; font-size: 24px; }
 .result-card h2 { font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: 38px; letter-spacing: -.04em; line-height: 1.12; margin: 18px 0 15px; }
 .result-card > p { color: #b0b7a0; font-size: 12px; line-height: 1.8; margin: 0 0 29px; }
@@ -146,6 +146,34 @@ body.is-playing .combat-hud { opacity: 1; visibility: visible; }
 .pause-card h2 { margin-top: 22px; }
 .mobile-only { display: none; }
 .browser-error { position: fixed; z-index: 100; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100% - 40px)); padding: 28px; border: 1px solid var(--copper); background: #18231b; box-shadow: 0 0 0 100vmax rgba(6, 13, 8, .85); color: var(--paper); font-size: 14px; line-height: 1.75; text-align: center; }
+
+/* Forged brass, worn vellum and blackened stone echo the sanctuary materials. */
+.start-content { margin-left: clamp(26px, 7vw, 130px); }
+.location-label { color: #e9c888; }
+.label-rule { width: 45px; background: linear-gradient(90deg, transparent, var(--copper)); }
+.label-rule::after { content: ''; float: right; width: 6px; height: 6px; border: 1px solid var(--copper); background: #463b2b; transform: translate(1px,-4px) rotate(45deg); }
+h1 { color: #f7ebd5; font-weight: 400; letter-spacing: -.045em; text-shadow: 0 2px #302722, 0 8px 28px #080810; }
+h1 em { color: #dfbd79; font-weight: 400; text-shadow: 0 1px #f6dca8, 0 3px #5b4329, 0 9px 24px #0a0910; }
+.start-description { max-width: 310px; font: 16px/1.55 Georgia, serif; color: #d7cdbd; }
+.encounter-picker legend, .start-controls { color: #b8b2aa; }
+.encounter-options { background: rgba(22,19,24,.78); border-color: #6d604c; }
+.encounter-options button[aria-pressed="true"] { background: linear-gradient(115deg,#534431bd,#342d2b88); box-shadow: inset 0 -2px #bfa673; }
+.encounter-options strong { font: 16px Georgia, serif; }
+.encounter-options small { color: #c9bfb0; font-size: 11px; }
+.primary-button { justify-content: center; background: linear-gradient(165deg,#ebce98,#c4a169 60%,#b99866); border-color: #e1c58b; outline: 1px solid #554630; outline-offset: -4px; color: #211b1b; font: 600 14px/1.2 Georgia,serif; text-transform: uppercase; letter-spacing: .12em; }
+.primary-button::before,.primary-button::after { content:''; width: 5px; height: 5px; border: 1px solid #6d5536; transform: rotate(45deg); }
+.primary-button:focus-visible { outline-offset: 3px; }
+.player-panel,.style-panel { background: linear-gradient(112deg,rgba(15,13,20,.91),rgba(26,22,25,.62) 78%,rgba(26,22,25,.24)); border-top-color: #9c855a; }
+.health-fill { background: linear-gradient(90deg,#843139,#da7968); }
+.enemy-fill { background: linear-gradient(90deg,#782b38,#d0705b 82%,#e39474); }
+.stamina-fill { background: linear-gradient(90deg,#618f7f,#acd4a3); }
+.meter-track { background: #73685e59; }
+.meter-track.health-track,.meter-track.enemy-health-track { box-shadow: 0 0 0 1px #c6a96d66,0 2px 3px #08070e; }
+.style-option,.icon-button,.touch-action { background-color: rgba(25,21,27,.8); }
+.enemy-panel h2 { color: #f6e5cd; text-shadow: 0 1px 6px #0b0911,0 2px 2px #0b0911; }
+#enemy-intent,.combat-message { text-shadow: 0 1px 2px black,0 0 7px black; }
+#enemy-intent.danger { color: #ffe3a4; }
+.pause-card h2 { margin-bottom: 28px; }
 
 @media (max-height: 820px) and (min-width: 801px) {
   .start-content { padding-top: 118px; padding-bottom: 65px; }
@@ -184,7 +212,7 @@ body.is-playing .combat-hud { opacity: 1; visibility: visible; }
   .brand .seal { width: 28px; height: 33px; }
   .brand span { font-size: 8px; }
   .experiment-badge { font-size: 8px; margin-right: 8px; }
-  .start-overlay { background: linear-gradient(90deg, rgba(10, 18, 12, .9), rgba(10, 18, 12, .65) 55%, rgba(10, 18, 12, .3)); }
+  .start-overlay { background: linear-gradient(90deg, rgba(13,12,19,.93), rgba(13,12,19,.58) 55%, rgba(13,12,19,.12)); }
   .start-content { padding-top: max(130px, 15vh); margin-left: 8vw; width: min(430px, 75vw); padding-bottom: 90px; }
   h1 { font-size: clamp(54px, 9vw, 75px); }
   .start-tagline { font-size: 25px; }
@@ -231,7 +259,7 @@ body.is-playing .combat-hud { opacity: 1; visibility: visible; }
   .topbar { left: 20px; right: 20px; top: max(19px, env(safe-area-inset-top)); }
   .experiment-badge { display: none; }
   .icon-button { width: 33px; height: 33px; }
-  .start-overlay { background: linear-gradient(90deg, rgba(9, 18, 11, .9), rgba(9, 18, 11, .54)), linear-gradient(0deg, rgba(9, 18, 11, .55), transparent); }
+  .start-overlay { background: linear-gradient(90deg, rgba(12,11,16,.87), rgba(12,11,16,.47)), linear-gradient(0deg, rgba(12,11,16,.55), transparent); }
   .start-content { margin-left: 8vw; padding-top: max(118px, 15vh); width: 84vw; padding-bottom: 80px; }
   .location-label { font-size: 8px; letter-spacing: .18em; margin-bottom: 24px; }
   h1 { font-size: clamp(49px, 13.5vw, 66px); margin-bottom: 24px; }

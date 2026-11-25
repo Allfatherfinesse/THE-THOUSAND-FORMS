@@ -7,7 +7,7 @@ A mythological dark-fantasy combat project. Read [AGENTS.md](AGENTS.md),
 
 **[Play the private app](https://thousand-forms-ashen-courtyard.ezcookings.chatgpt.site)**
 
-The camera follows over your fighter’s shoulder and locks onto the opponent at the
+Fight beneath the eclipse in a ruined Gothic sanctuary. The camera follows over your fighter’s shoulder and locks onto the opponent at the
 start of each encounter. Press **Tab** or tap the target icon for free look. Use
 the expand button for fullscreen play. [Publication record](docs/APP_PUBLICATION.md).
 

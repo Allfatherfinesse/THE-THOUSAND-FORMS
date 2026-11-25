@@ -1,66 +1,84 @@
-// Original synthesized sound. No remote audio or licensed samples.
+// All instruments are synthesized locally. Noise is generated once per audio context.
 export function createAudio() {
-  let context, master, enabled = true, ambientTimer;
-  const audio = () => {
-    if (!context) {
-      context = new (window.AudioContext || window.webkitAudioContext)();
-      master = context.createGain();
-      master.gain.value = enabled ? .32 : 0;
-      master.connect(context.destination);
+  let context, master, noiseBuffer, enabled = true, bellTimer;
+  const ready = () => enabled && context?.state === 'running' && !document.hidden;
+  function tone(start, end, length, level, type = 'sine', delay = 0) {
+    if (!ready()) return;
+    const time = context.currentTime + delay;
+    const voice = context.createOscillator(), env = context.createGain();
+    voice.type = type;
+    voice.frequency.setValueAtTime(start, time);
+    voice.frequency.exponentialRampToValueAtTime(end, time + length);
+    env.gain.setValueAtTime(.0001, time);
+    env.gain.exponentialRampToValueAtTime(level, time + .006);
+    env.gain.exponentialRampToValueAtTime(.0001, time + length);
+    voice.connect(env).connect(master);
+    voice.start(time); voice.stop(time + length + .01);
+    voice.onended = () => { voice.disconnect(); env.disconnect(); };
+  }
+  function noise(length, level, from, to) {
+    if (!ready()) return;
+    const time = context.currentTime;
+    const voice = context.createBufferSource(), filter = context.createBiquadFilter(), env = context.createGain();
+    voice.buffer = noiseBuffer;
+    filter.type = 'bandpass'; filter.Q.value = .8;
+    filter.frequency.setValueAtTime(from, time);
+    filter.frequency.exponentialRampToValueAtTime(to, time + length);
+    env.gain.setValueAtTime(.0001, time);
+    env.gain.exponentialRampToValueAtTime(level, time + .009);
+    env.gain.exponentialRampToValueAtTime(.0001, time + length);
+    voice.connect(filter).connect(env).connect(master);
+    voice.start(time, Math.random() * .45, length);
+    voice.onended = () => { voice.disconnect(); filter.disconnect(); env.disconnect(); };
+  }
+  function bell(root, length, gain) {
+    for (const [ratio, volume, decay] of [[1, 1, 1], [2.39, .31, .65], [3.07, .18, .4], [4.16, .08, .22]]) {
+      tone(root * ratio, root * ratio * .995, length * decay, gain * volume);
     }
-    return context;
-  };
-  function tone(frequency, length = .2, volume = .18, type = 'sine', end = frequency) {
-    if (!enabled || !context || context.state !== 'running') return;
-    const now = context.currentTime, oscillator = context.createOscillator(), gain = context.createGain();
-    oscillator.type = type;
-    oscillator.frequency.setValueAtTime(frequency, now);
-    oscillator.frequency.exponentialRampToValueAtTime(Math.max(20, end), now + length);
-    gain.gain.setValueAtTime(.001, now);
-    gain.gain.exponentialRampToValueAtTime(volume, now + .008);
-    gain.gain.exponentialRampToValueAtTime(.001, now + length);
-    oscillator.connect(gain); gain.connect(master);
-    oscillator.start(now); oscillator.stop(now + length + .02);
-    oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
   }
-  function noise(length = .12, volume = .16, cutoff = 1200) {
-    if (!enabled || !context || context.state !== 'running') return;
-    const buffer = context.createBuffer(1, Math.ceil(context.sampleRate * length), context.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
-    const source = context.createBufferSource(), filter = context.createBiquadFilter(), gain = context.createGain();
-    source.buffer = buffer; filter.type = 'lowpass'; filter.frequency.value = cutoff;
-    gain.gain.value = volume;
-    source.connect(filter); filter.connect(gain); gain.connect(master);
-    source.start();
-    source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
-  }
+  let toll = 0;
   return {
     async unlock() {
       try {
-        await audio().resume();
-        if (!ambientTimer) {
-          ambientTimer = setInterval(() => {
-            if (!document.hidden) tone([110, 146.83, 164.81, 220][Math.floor(Math.random() * 4)], 2.5, .022);
-          }, 2800);
+        if (!context) {
+          context = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+          master = context.createGain(); master.gain.value = enabled ? .36 : 0;
+          master.connect(context.destination);
+          noiseBuffer = context.createBuffer(1, context.sampleRate, context.sampleRate);
+          const samples = noiseBuffer.getChannelData(0);
+          for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
         }
-      } catch { /* Audio is optional when device policy blocks it. */ }
+        await context.resume();
+        if (!bellTimer) {
+          const tollBell = () => bell([73.42, 110, 82.41, 73.42][toll++ % 4], 3.1, .047);
+          tollBell(); bellTimer = setInterval(tollBell, 12500);
+        }
+      } catch { /* Sound is optional when the browser blocks audio. */ }
     },
-    setEnabled(value) { enabled = value; if (master) master.gain.setTargetAtTime(value ? .32 : 0, context.currentTime, .05); },
-    event(event) {
-      switch (event.type) {
-        case 'strike': noise(.12, .1, 1800); break;
-        case 'hit': noise(.13, .55, 700); tone(105, .16, .55, 'sine', 38); break;
-        case 'block': noise(.07, .26, 1400); tone(180, .12, .2, 'triangle', 75); break;
-        case 'deflect': tone(980, .5, .14, 'sine', 600); tone(1470, .35, .06); break;
-        case 'evade': noise(.18, .12, 2600); break;
-        case 'style': tone(440, .18, .08); tone(660, .3, .05); break;
-        case 'break': noise(.3, .4, 400); tone(75, .4, .35, 'triangle', 30); break;
-        case 'phase': tone(75, 1.4, .3, 'sine', 45); break;
-        case 'win': [220, 330, 440].forEach((f, i) => setTimeout(() => tone(f, 1.2, .13), i * 160)); break;
-        case 'lose': tone(110, 1.6, .15, 'sine', 45); break;
+    setEnabled(value) {
+      enabled = value;
+      if (master) master.gain.setTargetAtTime(value ? .36 : 0, context.currentTime, .025);
+    },
+    step(gain) { noise(.085, gain * .15, 1200, 350); tone(82, 45, .085, gain * .07); },
+    event(e) {
+      const heavy = e.kind === 'heavy' || e.kind === 'hybrid' || e.damage >= 20;
+      const pitch = e.actor === 'enemy' ? .84 : 1;
+      switch (e.type) {
+        case 'strike': noise(heavy ? .16 : .09, heavy ? .34 : .23, 620 * pitch, (heavy ? 1550 : 2600) * pitch); break;
+        case 'hit':
+          noise(heavy ? .14 : .083, heavy ? .72 : .47, 2200 * pitch, 360);
+          tone((heavy ? 118 : 170) * pitch, heavy ? 39 : 64, heavy ? .20 : .11, heavy ? .58 : .34);
+          break;
+        case 'block': noise(.08, .36, 2100, 720); tone(238, 92, .13, .20, 'triangle'); break;
+        case 'deflect': noise(.045, .32, 4200, 1800); bell(836, .72, .17); break;
+        case 'evade': noise(.19, .19, 1500, 430); break;
+        case 'style': bell([330, 392, 440][e.style] || 330, .35, .08); break;
+        case 'break': noise(.24, .54, 1750, 260); tone(95, 31, .33, .41); break;
+        case 'phase': bell(65.41, 2.3, .24); break;
+        case 'win': bell(196, 1.7, .15); tone(293.66, 293.66, 1.3, .12, 'sine', .22); break;
+        case 'lose': bell(73.42, 2.2, .18); break;
       }
     },
-    dispose() { clearInterval(ambientTimer); context?.close(); }
+    dispose() { clearInterval(bellTimer); context?.close(); },
   };
 }

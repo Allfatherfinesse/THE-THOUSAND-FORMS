@@ -2,7 +2,7 @@
 
 A small, playable 3D browser combat experiment. Choose a sparring partner or the
 Fractured Master, switch among three provisional disciplines and find your opening.
-This is a separate browser implementation; it does not certify the Unreal project.
+The fight takes place amid the pointed arches and weathered stone of the Ashen Courtyard.
 
 ## Play
 
@@ -25,7 +25,8 @@ is required for the downloaded copy. If your browser restricts local files, run
 `npm start` and open `http://localhost:4173` instead.
 
 Choose **Sparring** first, then **Enter the courtyard**. Move close enough to strike.
-Amber ground markings show an incoming attack; evade or time your guard, then hit
+You can queue a follow-up during recovery. The opponent also circles and retreats,
+so step into range before committing. Amber ground markings show an incoming attack; evade or time your guard, then hit
 during the opponent's recovery. Posture fills toward a vulnerable break. The boss
 resists ordinary flinches during attacks; deflects and posture breaks interrupt it.
 
@@ -66,7 +67,7 @@ procedural courtyard and articulated fighters in Three.js. `main.js` connects
 keyboard, mouse/touch input, HUD, sound and encounter flow. Rebuild `game.bundle.js`
 after changes to any JavaScript source. Keep the offline bundle in source control.
 
-The 19 rule tests cover defenses, resources, buffering, range, posture, hybrid
+The 26 rule tests cover defenses, resources, buffering, range, posture, hybrid
 actions, boss phases, frame-step consistency and actual wins in both encounters.
 The optional browser test uses Playwright:
 

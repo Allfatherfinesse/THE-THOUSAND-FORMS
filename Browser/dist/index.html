@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#141715">
+  <meta name="theme-color" content="#15151c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Thousand Forms">
@@ -29,7 +29,6 @@
         <span>THE THOUSAND<br><strong>FORMS</strong></span>
       </a>
       <div class="utility-controls">
-        <span class="experiment-badge"><i aria-hidden="true"></i> Browser combat experiment</span>
         <span id="camera-help" hidden>Free camera · Drag to look</span>
         <button class="icon-button play-only" id="lock-toggle" type="button" aria-label="Release opponent lock" aria-pressed="true" title="Opponent locked · Tab">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5" stroke="currentColor" stroke-width="1.5"/></svg>
@@ -49,18 +48,18 @@
     <section class="combat-hud player-panel" aria-label="Player status">
       <div class="panel-heading"><span class="eyebrow">THE SEEKER</span><span class="small-label">YOU</span></div>
       <div class="meter-label"><span>Vitality</span><span id="health-value">100</span></div>
-      <div class="meter-track health-track" aria-label="Player health"><span id="player-health" class="meter-fill health-fill" style="width:100%"></span></div>
+      <div class="meter-track health-track" aria-label="Player health"><span id="player-health" class="meter-fill health-fill" ></span></div>
       <div class="secondary-meters">
-        <div class="meter-group"><div class="meter-label"><span>Stamina</span><span id="stamina-value">100</span></div><div class="meter-track"><span id="player-stamina" class="meter-fill stamina-fill" style="width:100%"></span></div></div>
-        <div class="meter-group"><div class="meter-label"><span>Posture</span></div><div class="meter-track"><span id="player-posture" class="meter-fill posture-fill" style="width:0%"></span></div></div>
+        <div class="meter-group"><div class="meter-label"><span>Stamina</span><span id="stamina-value">100</span></div><div class="meter-track"><span id="player-stamina" class="meter-fill stamina-fill" ></span></div></div>
+        <div class="meter-group"><div class="meter-label"><span>Posture</span></div><div class="meter-track"><span id="player-posture" class="meter-fill posture-fill" style="transform:scaleX(0)"></span></div></div>
       </div>
     </section>
 
     <section class="combat-hud enemy-panel" aria-label="Opponent status">
       <span class="eyebrow">YOUR OPPONENT</span>
       <h2 id="enemy-name">The Courtyard Keeper</h2>
-      <div class="meter-track enemy-health-track" aria-label="Opponent health"><span id="enemy-health" class="meter-fill enemy-fill" style="width:100%"></span></div>
-      <div class="meter-track enemy-posture-track" aria-label="Opponent posture"><span id="enemy-posture" class="meter-fill posture-fill" style="width:0%"></span></div>
+      <div class="meter-track enemy-health-track" aria-label="Opponent health"><span id="enemy-health" class="meter-fill enemy-fill" ></span></div>
+      <div class="meter-track enemy-posture-track" aria-label="Opponent posture"><span id="enemy-posture" class="meter-fill posture-fill" style="transform:scaleX(0)"></span></div>
       <p id="enemy-intent">Watch. Learn. Respond.</p>
     </section>
 
@@ -90,23 +89,20 @@
 
     <section id="start-overlay" class="start-overlay" aria-labelledby="game-title">
       <div class="start-content">
-        <div class="location-label"><span class="label-rule" aria-hidden="true"></span><span>THE ASHEN COURTYARD</span><span class="location-number">01</span></div>
+        <div class="location-label"><span class="label-rule" aria-hidden="true"></span><span>THE ASHEN COURTYARD</span></div>
         <h1 id="game-title"><span>THE</span>THOUSAND<br><em>FORMS</em></h1>
-        <p class="start-tagline">A thousand paths.<br>One worthy opponent.</p>
-        <p class="start-description">Find your distance. Read the opening.<br>Make every movement matter.</p>
+        <p class="start-description">Spar with the Silent Disciple or challenge the Fractured Master.</p>
         <fieldset class="encounter-picker">
           <legend>CHOOSE YOUR ENCOUNTER</legend>
           <div class="encounter-options">
-            <button type="button" data-mode="sparring" aria-pressed="true"><span class="choice-mark" aria-hidden="true"></span><span><strong>Sparring</strong><small>Find your rhythm</small></span></button>
-            <button type="button" data-mode="boss" aria-pressed="false"><span class="choice-mark" aria-hidden="true"></span><span><strong>The Master</strong><small>Test your resolve</small></span></button>
+            <button type="button" data-mode="sparring" aria-pressed="true"><span class="choice-mark" aria-hidden="true"></span><span><strong>Sparring</strong><small>The Silent Disciple</small></span></button>
+            <button type="button" data-mode="boss" aria-pressed="false"><span class="choice-mark" aria-hidden="true"></span><span><strong>The Master</strong><small>Two-phase boss</small></span></button>
           </div>
         </fieldset>
-        <button class="primary-button" type="button" data-start><span>Enter the courtyard</span><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="primary-button" type="button" data-start><span>Enter the courtyard</span></button>
         <p class="start-controls desktop-only"><span><kbd>WASD / ARROWS</kbd> Move</span><span><kbd>J / K</kbd> Strike</span><span><kbd>F</kbd> Guard</span><span><kbd>SPACE</kbd> Evade</span><span><kbd>1 / 2 / 3</kbd> Style</span><span><kbd>TAB</kbd> Lock on</span><span><kbd>RMB DRAG</kbd> Look when unlocked</span><span><kbd>ESC / P</kbd> Pause</span></p>
         <p class="start-controls mobile-only">Use the target button to unlock the camera, then drag the scene to look. Touch combat controls appear when you enter.</p>
       </div>
-      <div class="courtyard-caption" aria-hidden="true"><span class="caption-line"></span><p>A QUIET PLACE<br>TO BECOME DANGEROUS.</p><span class="caption-coordinates">FORM / INTENT / DISCIPLINE</span></div>
-      <footer class="start-footer"><span>THREE DISCIPLINES. ONE COURTYARD.</span><span>AN EARLY COMBAT EXPERIMENT <i aria-hidden="true">/</i> PLAYABLE IN YOUR BROWSER</span></footer>
     </section>
 
     <section id="result-overlay" class="modal-overlay" aria-labelledby="result-title" hidden>
@@ -122,9 +118,8 @@
 
     <section id="pause-overlay" class="modal-overlay" aria-labelledby="pause-title" hidden>
       <div class="result-card pause-card">
-        <span class="eyebrow">A MOMENT OF STILLNESS</span>
-        <h2 id="pause-title">Find your breath.</h2>
-        <p>The courtyard can wait.</p>
+        <span class="eyebrow">ENCOUNTER PAUSED</span>
+        <h2 id="pause-title">Paused</h2>
         <button class="primary-button" type="button" data-resume><span>Return to the fight</span><span aria-hidden="true">↗</span></button>
         <button class="text-button" type="button" data-return>Return to the courtyard gate</button>
       </div>
