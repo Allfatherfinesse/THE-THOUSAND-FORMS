@@ -1,29 +1,35 @@
 import * as THREE from './vendor/three.module.js';
 import { buildSanctuary } from './sanctuary.js';
+import { hangStandards } from './standards.js';
 import { createFighterMotion, updateFighterMotion } from './fighter-motion.js';
+import { createFighterArt } from './fighter-art.js';
 import { batchFighter } from './rig-batches.js';
 
-// Procedural, asset-free presentation for the browser combat experiment.
+// Third-person presentation for the browser combat experiment.
 const TAU = Math.PI * 2;
 const STYLE_COLORS = [0xe4b970, 0x9ddbd6, 0xbcb0ed];
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const ease = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+const renderState = game => typeof game?.getRenderState === 'function' ? game.getRenderState() : game;
 
-export function createRenderer(canvas) {
+export function createRenderer(canvas, horizonUrl = './art/storm-horizon.jpg') {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
-  let renderScale = 1, slowTime = 0, fastTime = 0;
+  let renderScale = 1, slowTime = 0, fastTime = 0, heavyFrames = 0;
   function fitResolution() {
     const native = Math.min(window.devicePixelRatio || 1, 1.75, Math.sqrt(2400000 / (width * height)));
     renderer.setPixelRatio(native * renderScale);
   }
   // The HUD stays at device resolution. Only the 3D canvas scales under sustained load.
   function trackFrameTime(seconds) {
-    if (seconds <= 0 || seconds > 1) { slowTime = fastTime = 0; return; }
-    slowTime = seconds > .026 ? slowTime + seconds : Math.max(0, slowTime - seconds * 2);
+    if (seconds <= 0) return;
+    const sampled = Math.min(.25, seconds);
+    slowTime = seconds > .026 ? slowTime + sampled : Math.max(0, slowTime - sampled * 2);
     fastTime = seconds < .0185 ? fastTime + seconds : 0;
-    if ((slowTime >= 1.6 && renderScale > .65) || (fastTime >= 6 && renderScale < 1)) {
-      renderScale = clamp(renderScale + (slowTime >= 1.6 ? -.15 : .1), .65, 1);
-      slowTime = fastTime = 0;
+    heavyFrames = seconds > .075 ? heavyFrames + 1 : 0;
+    const overloaded = heavyFrames >= 3 || slowTime >= 1.4;
+    if ((overloaded && renderScale > .55) || (fastTime >= 6 && renderScale < 1)) {
+      renderScale = clamp(renderScale + (overloaded ? -.15 : .1), .55, 1);
+      slowTime = fastTime = heavyFrames = 0;
       fitResolution();
     }
   }
@@ -36,6 +42,8 @@ export function createRenderer(canvas) {
   scene.background = new THREE.Color(0x15202d);
   scene.fog = new THREE.FogExp2(0x263a4a, 0.026);
   const camera = new THREE.PerspectiveCamera(58, 1, .08, 110);
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let baseFov = 58;
   const cameraTarget = new THREE.Vector3(0, 1.15, 2.25);
   const framedTarget = cameraTarget.clone();
   const nearView = new THREE.Vector3();
@@ -88,13 +96,62 @@ export function createRenderer(canvas) {
   const tapered = geometry('tapered', () => new THREE.CylinderGeometry(.85, 1, 1, 10));
   const sphere = geometry('sphere', () => new THREE.SphereGeometry(1, 12, 9));
   const octa = geometry('octa', () => new THREE.IcosahedronGeometry(1, 0));
-  const stone = [0x4a4b4b, 0x555450, 0x484e50, 0x50534f, 0x454849, 0x595650].map(c => material(c));
+  const stone = [0x77817f, 0x7d7c73, 0x727e84, 0x798078, 0x6c7576, 0x888273].map(c => material(c));
   const edgeStone = material(0x363e42);
   const blackStone = material(0x202a30);
   const brass = material(0xb89a62, { roughness: .54, metalness: .48 });
   const inscription = material(0x9d865b, { roughness: .7, metalness: .22 });
-  const flameCore = basic(0xffe5a3);
-  const flameOuter = basic(0xed7333, { transparent: true, opacity: .62, depthWrite: false, blending: THREE.AdditiveBlending });
+  const charcoal = material(0x201714, { roughness: .96, metalness: 0, emissive: 0x8f2008, emissiveIntensity: .2 });
+  const emberCoal = material(0x4c2212, { roughness: .88, metalness: 0, emissive: 0xe45413, emissiveIntensity: .65 });
+  const glowCanvas = document.createElement('canvas');
+  glowCanvas.width = glowCanvas.height = 128;
+  const glowContext = glowCanvas.getContext('2d');
+  const glowGradient = glowContext.createRadialGradient(64, 64, 0, 64, 64, 64);
+  glowGradient.addColorStop(0, 'rgba(255,207,128,.62)');
+  glowGradient.addColorStop(.22, 'rgba(249,129,43,.25)');
+  glowGradient.addColorStop(.65, 'rgba(201,76,17,.04)');
+  glowGradient.addColorStop(1, 'rgba(156,48,8,0)');
+  glowContext.fillStyle = glowGradient; glowContext.fillRect(0, 0, 128, 128);
+  const glowTexture = new THREE.CanvasTexture(glowCanvas); glowTexture.colorSpace = THREE.SRGBColorSpace;
+  const flameGlow = new THREE.SpriteMaterial({ map: glowTexture, transparent: true, opacity: .8, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+  ownedMaterials.add(flameGlow);
+  flameGlow.addEventListener('dispose', () => glowTexture.dispose());
+  function flameMaterial(phase) {
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { time: { value: 0 }, phase: { value: phase } },
+      transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+      vertexShader: `varying vec2 vUv;
+        uniform float time; uniform float phase;
+        void main() {
+          vUv = uv; vec3 p = position;
+          p.x += sin(time * 4.7 + uv.y * 10.0 + phase) * uv.y * uv.y * .085;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: `varying vec2 vUv;
+        uniform float time; uniform float phase;
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+        float noise(vec2 p) {
+          vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+          return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);
+        }
+        void main() {
+          float t = time + phase, y = vUv.y;
+          float turbulence = noise(vec2(vUv.x * 5.0, y * 5.0 - t * 2.8));
+          float curl = sin(y * 11.0 - t * 5.0) * .06 * y;
+          float x = abs(vUv.x - .5 + curl + (turbulence - .5) * .09);
+          float width = .31 * pow(max(0., 1.0-y), .8) + .018;
+          float body = 1.0 - smoothstep(width * .35, width, x);
+          float tip = 1.0 - smoothstep(.65, 1.0, y + turbulence * .2);
+          float alpha = body * tip * smoothstep(.0,.075,y);
+          float core = (1.0-smoothstep(.02,.14,x)) * (1.0-smoothstep(.18,.6,y));
+          vec3 color = mix(vec3(1.2,.16,.012), vec3(1.8,.68,.12), body * (1.0-y*.7));
+          color = mix(color, vec3(2.2,1.6,.72), core);
+          gl_FragColor = vec4(color, alpha * .91);
+          #include <colorspace_fragment>
+        }`,
+    });
+    ownedMaterials.add(mat); return mat;
+  }
 
   let seed = 4817;
   function random() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
@@ -105,21 +162,21 @@ export function createRenderer(canvas) {
   }
   function tileGeometry(inner, outer, count) {
     return geometry(`tile:${inner}:${outer}:${count}`, () => {
-      const gap = .012;
+      const gap = .0018;
       const angle = TAU / count;
       const shape = new THREE.Shape();
       shape.absarc(0, 0, outer, gap, angle - gap, false);
       shape.lineTo(Math.cos(angle - gap) * inner, Math.sin(angle - gap) * inner);
       shape.absarc(0, 0, inner, angle - gap, gap, true);
       shape.closePath();
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: .075, bevelEnabled: false, curveSegments: 3 });
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: .075, bevelEnabled: true, bevelSegments: 1, bevelSize: .004, bevelThickness: .004, steps: 1, curveSegments: 3 });
       geo.rotateX(-Math.PI / 2);
       return geo;
     });
   }
 
-  scene.add(new THREE.HemisphereLight(0xa9bfd6, 0x4c3e30, 1.85));
-  const moonLight = new THREE.DirectionalLight(0xb9d1ea, 2.45);
+  scene.add(new THREE.HemisphereLight(0xadc4d8, 0x34352f, 1.35));
+  const moonLight = new THREE.DirectionalLight(0xc2d2e1, 2.7);
   moonLight.position.set(-8, 16, -12);
   moonLight.castShadow = true;
   moonLight.shadow.mapSize.set(1024, 1024);
@@ -127,7 +184,7 @@ export function createRenderer(canvas) {
   moonLight.shadow.bias = -.0008;
   moonLight.shadow.normalBias = .035;
   scene.add(moonLight);
-  const warmFill = new THREE.DirectionalLight(0xe6bd8b, .88);
+  const warmFill = new THREE.DirectionalLight(0xdac8ad, .5);
   warmFill.position.set(7, 5, 10);
   scene.add(warmFill);
 
@@ -135,15 +192,15 @@ export function createRenderer(canvas) {
   mesh(scene, geometry('land', () => new THREE.CylinderGeometry(20, 22, .6, 64)), material(0x161f25), [0, -.7, 0], [1, 1, 1]);
   mesh(scene, geometry('foundation', () => new THREE.CylinderGeometry(9.75, 10.15, .58, 96)), edgeStone, [0, -.32, 0]);
   mesh(scene, geometry('floor', () => new THREE.CylinderGeometry(9.25, 9.25, .16, 96)), blackStone, [0, -.09, 0]);
-  [[1.7, 3.28, 24], [3.34, 5.1, 32], [5.16, 6.86, 40], [6.92, 8.7, 48]].forEach(([inner, outer, count], index) => {
+  [[1.7, 3.32, 24], [3.34, 5.14, 32], [5.16, 6.9, 40], [6.92, 8.7, 48], [8.76, 9.11, 48]].forEach(([inner, outer, count], index) => {
     const geo = tileGeometry(inner, outer, count);
     for (let i = 0; i < count; i++) {
-      const item = mesh(scene, geo, stone[Math.floor(random() * stone.length)], [0, -.05 + random() * .014, 0]);
+      const item = mesh(scene, geo, stone[Math.floor(random() * stone.length)], [0, -.05 + random() * .008, 0]);
       item.rotation.y = i * TAU / count + (index % 2 ? .075 : 0);
       item.castShadow = false;
     }
   });
-  mesh(scene, geometry('centerdisc', () => new THREE.CylinderGeometry(1.64, 1.64, .08, 64)), stone[3], [0, -.007, 0]);
+  mesh(scene, geometry('centerdisc', () => new THREE.CylinderGeometry(1.68, 1.68, .08, 64)), stone[3], [0, -.007, 0]);
   [1.7, 3.3, 5.12, 6.9, 8.74, 9.13].forEach((radius, i) => ring(scene, radius, i === 5 ? .035 : .014, i > 3 ? brass : inscription));
   ring(scene, .82, .016, inscription, .045, 64);
   ring(scene, 1.48, .018, brass, .045, 64);
@@ -184,20 +241,47 @@ export function createRenderer(canvas) {
   ownedMaterials.add(crackMat);
   scene.add(new THREE.LineSegments(crackGeometry, crackMat));
 
-  const { moonHalo } = buildSanctuary({
+  const { moonHalo, skyReady } = buildSanctuary({
+    horizonUrl,
+    // Reserve glossy image-based reflection for damp slabs and reflective metal.
+    // The much larger matte surfaces already receive skylight from the hemisphere.
+    reflectSky(lightMap) {
+      for (const mat of ownedMaterials) {
+        if (!mat.isMeshStandardMaterial || (mat.metalness < .28 && !stone.includes(mat))) continue;
+        mat.envMap = lightMap;
+        mat.envMapIntensity = .34;
+        mat.needsUpdate = true;
+      }
+    },
     scene, geometry, material, basic, mesh, terrainMaterials: stone,
   });
+
+  const bannerWind = hangStandards({ scene, geometry, material, mesh });
 
   function brazier(x, z, phase) {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
     mesh(group, cylinder, edgeStone, [0, .16, 0], [.44, .32, .44]);
     mesh(group, cylinder, blackStone, [0, .63, 0], [.16, .8, .16]);
-    mesh(group, geometry('bowl', () => new THREE.CylinderGeometry(.36, .22, .25, 10)), brass, [0, 1.03, 0]);
-    const outer = mesh(group, octa, flameOuter, [0, 1.43, 0], [.23, .52, .23], false);
-    const inner = mesh(group, octa, flameCore, [.015, 1.34, 0], [.12, .3, .12], false);
-    const light = new THREE.PointLight(0xffa351, 8.5, 7, 2);
-    light.position.set(0, 1.6, 0);
+    mesh(group, geometry('bowl', () => new THREE.LatheGeometry([
+      new THREE.Vector2(.14,-.13), new THREE.Vector2(.23,-.09), new THREE.Vector2(.34,.08),
+      new THREE.Vector2(.37,.13), new THREE.Vector2(.33,.13), new THREE.Vector2(.29,.06),
+      new THREE.Vector2(.19,-.065), new THREE.Vector2(.14,-.07),
+    ], 16)), brass, [0, 1.03, 0]);
+    for (let i = 0; i < 3; i++) {
+      const log = mesh(group, cylinder, charcoal, [(i - 1) * .07, 1.08 + (i % 2) * .045, 0], [.055, .5, .055]);
+      log.rotation.z = Math.PI / 2; log.rotation.y = i * 1.1;
+    }
+    for (let i = 0; i < 7; i++) {
+      const angle = i * TAU / 7;
+      mesh(group, octa, emberCoal, [Math.sin(angle) * .19, 1.10, Math.cos(angle) * .19], [.065, .035, .065], false);
+    }
+    const outer = mesh(group, geometry('practical-flame', () => new THREE.PlaneGeometry(1, 1, 4, 12)), flameMaterial(phase), [0, 1.58, 0], [.72, 1.08, 1], false);
+    outer.userData.noStaticBatch = true; outer.userData.noCameraCollision = true;
+    const inner = new THREE.Sprite(flameGlow);
+    inner.position.set(0, 1.4, 0); inner.scale.set(1.25, 1.5, 1); group.add(inner);
+    const light = new THREE.PointLight(0xffa051, 22, 8, 2);
+    light.position.set(0, 1.48, 0);
     group.add(light);
     flames.push({ outer, inner, light, phase, x, z });
     scene.add(group);
@@ -256,35 +340,63 @@ export function createRenderer(canvas) {
     staticInstances.push(instances);
   }
 
-  function limb(parent, x, y, z, upperLength, lowerLength, skinMat, clothMat, wrapMat, leg = false) {
+  const fighterArt = createFighterArt(geometry, material);
+  const contactData = new Uint8Array(64 * 64 * 4);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    const distance = Math.hypot((x - 31.5) / 31.5, (y - 31.5) / 31.5);
+    const i = (y * 64 + x) * 4;
+    contactData[i] = contactData[i + 1] = contactData[i + 2] = 255;
+    contactData[i + 3] = Math.round(210 * Math.exp(-distance * distance * 4) * (1 - ease(distance)));
+  }
+  const contactMap = new THREE.DataTexture(contactData, 64, 64);
+  contactMap.magFilter = contactMap.minFilter = THREE.LinearFilter;
+  contactMap.needsUpdate = true;
+  let contactUsers = 0;
+  function limb(parent, x, y, z, upperLength, lowerLength, skinMat, clothMat, wrapMat, leatherMat, leg = false) {
     const pivot = new THREE.Group();
     pivot.position.set(x, y, z);
     parent.add(pivot);
-    const muscle = geometry('fighter-muscle', () => new THREE.LatheGeometry([
-      new THREE.Vector2(0, -.5), new THREE.Vector2(.65, -.47),
-      new THREE.Vector2(.94, -.27), new THREE.Vector2(1, .08),
-      new THREE.Vector2(.75, .43), new THREE.Vector2(0, .5),
-    ], 10));
-    mesh(pivot, muscle, clothMat, [0, -upperLength / 2, 0], [leg ? .126 : .088, upperLength, leg ? .118 : .082]);
+    mesh(pivot, leg ? fighterArt.thigh : fighterArt.upperArm, leg ? clothMat : skinMat,
+      [0, -upperLength / 2, 0], [leg ? .115 : .080, upperLength, leg ? .108 : .078]);
+    if (!leg) {
+      // A short fitted sleeve ends above the biceps, exposing the arm profile.
+      mesh(pivot, fighterArt.upperArm, clothMat, [0, -.045, 0], [.087, .17, .085]);
+    }
     const joint = new THREE.Group();
     joint.position.y = -upperLength;
     pivot.add(joint);
-    mesh(joint, muscle, leg ? clothMat : skinMat, [0, -lowerLength / 2, 0], [leg ? .091 : .067, lowerLength, leg ? .093 : .067]);
-    // Broad wrapped cuffs read at gameplay distance; a few raised seams imply layers.
-    mesh(joint, tapered, wrapMat, [0, -lowerLength * .66, 0], [leg ? .098 : .075, lowerLength * .54, leg ? .098 : .075]);
-    for (const offset of [-.06, .035]) {
-      const seam = mesh(joint, cylinder, clothMat, [0, -lowerLength * .66 + offset, 0], [leg ? .100 : .077, .012, leg ? .100 : .077]);
-      seam.rotation.z = .08;
+    mesh(joint, sphere, leg ? clothMat : skinMat, [0, -.002, .008],
+      [leg ? .066 : .046, leg ? .054 : .046, leg ? .063 : .044]);
+    mesh(joint, leg ? fighterArt.calf : fighterArt.forearm, leg ? clothMat : skinMat,
+      [0, -lowerLength / 2, 0], [leg ? .078 : .067, lowerLength, leg ? .076 : .065]);
+    mesh(joint, leg ? fighterArt.calf : fighterArt.forearm, wrapMat,
+      [0, -lowerLength * .61, 0], [leg ? .081 : .063, lowerLength * .70, leg ? .080 : .064]);
+    for (let i = 0; i < 4; i++) {
+      const width = leg ? .063 - i * .005 : .055 - i * .004;
+      const seam = mesh(joint, cylinder, wrapMat, [0, -lowerLength * (.43 + i * .13), 0], [width, .009, width]);
+      seam.rotation.z = .12;
     }
     const foot = new THREE.Group();
     foot.position.y = -lowerLength;
     joint.add(foot);
     if (leg) {
-      mesh(foot, sphere, clothMat, [0, .007, .07], [.089, .065, .155]);
-      mesh(foot, box, wrapMat, [0, -.028, .08], [.17, .025, .27]);
+      mesh(foot, sphere, leatherMat, [0, .005, .058], [.074, .053, .139]);
+      mesh(foot, sphere, leatherMat, [0, -.023, .064], [.076, .022, .143]);
+      mesh(foot, sphere, wrapMat, [0, .039, .014], [.063, .024, .056]);
+      for (const offset of [-.019, .010, .039]) {
+        const lace = mesh(foot, box, leatherMat, [0, .055, offset], [.083, .008, .009]);
+        lace.rotation.y = offset < 0 ? -.18 : .18;
+      }
     } else {
-      mesh(foot, sphere, skinMat, [0, -.025, .013], [.067, .084, .067]);
-      mesh(foot, box, wrapMat, [0, -.004, .055], [.10, .09, .025]);
+      mesh(foot, fighterArt.hand, skinMat);
+      // Four curled fingers, a separate thumb and the wrist wrap replace the mitten.
+      for (let i = 0; i < 4; i++) {
+        const knuckle = mesh(foot, sphere, skinMat, [(i - 1.5) * .024, -.071 + Math.abs(i - 1.5) * .005, .040], [.014, .028, .015]);
+        knuckle.rotation.z = (i - 1.5) * -.045;
+      }
+      const thumb = mesh(foot, sphere, skinMat, [x < 0 ? .047 : -.047, -.037, .033], [.023, .037, .025]);
+      thumb.rotation.z = x < 0 ? .48 : -.48;
+      mesh(foot, cylinder, wrapMat, [0, .006, 0], [.035, .044, .030]);
     }
     return { pivot, joint, foot };
   }
@@ -292,107 +404,117 @@ export function createRenderer(canvas) {
   function createFighter(id) {
     const enemy = id === 'enemy';
     const root = new THREE.Group();
-    const skin = material(enemy ? 0xa08a77 : 0xb58d69, { roughness: .72, metalness: 0 });
-    const cloth = material(enemy ? 0x41333c : 0x294348, { roughness: .96, metalness: 0 });
-    const clothLight = material(enemy ? 0x63595b : 0x56635e, { roughness: .98, metalness: 0 });
-    const trousers = material(enemy ? 0x28282e : 0x253337, { roughness: .94, metalness: 0 });
-    const wrap = material(enemy ? 0xb0a18a : 0xc9bba0, { roughness: 1, metalness: 0 });
-    const armor = material(enemy ? 0x615a49 : 0x5b655d, { roughness: .55, metalness: .55 });
-    const trim = material(enemy ? 0xb59a67 : 0xa58a52, { roughness: .55, metalness: .62 });
-    const belt = material(enemy ? 0x924e3d : STYLE_COLORS[0], { roughness: .88, metalness: .12 });
-    const hair = material(enemy ? 0x9d9c90 : 0x171e21, { roughness: .9 });
-    const eyes = basic(enemy ? 0xdca36a : 0x272b29);
-    const panelShape = geometry('fighter-tattered-panel', () => {
-      const shape = new THREE.Shape();
-      shape.moveTo(-.5, 0); shape.lineTo(.5, 0); shape.lineTo(.43, -.83);
-      shape.lineTo(.23, -.96); shape.lineTo(.13, -.84); shape.lineTo(-.08, -1);
-      shape.lineTo(-.22, -.89); shape.lineTo(-.43, -.96); shape.closePath();
-      const result = new THREE.ExtrudeGeometry(shape, { depth: .014, bevelEnabled: false });
-      result.translate(0, 0, -.007);
-      return result;
-    });
-    const clothPanel = (parent, mat, x, y, z, panelWidth, panelLength) => {
+    const skin = fighterArt.finish(enemy ? 0xad9481 : 0xae8261, 'skin');
+    const cloth = fighterArt.finish(enemy ? 0x493b3f : 0x304b4e, 'cloth', { side: THREE.DoubleSide });
+    const clothLight = fighterArt.finish(enemy ? 0x72685d : 0x68726a, 'cloth', { side: THREE.DoubleSide });
+    const trousers = fighterArt.finish(enemy ? 0x333033 : 0x303b3c, 'cloth');
+    const wrap = fighterArt.finish(enemy ? 0xb6a488 : 0xbdb296, 'wrap', { side: THREE.DoubleSide });
+    const leather = fighterArt.finish(enemy ? 0x493b32 : 0x3c3830, 'leather');
+    const armor = fighterArt.finish(enemy ? 0x66685e : 0x65706a, 'metal');
+    const trim = fighterArt.finish(enemy ? 0xa48b5b : 0x9c875e, 'metal', { roughness: .61 });
+    const belt = fighterArt.finish(enemy ? 0x7f4d3c : 0xa08b60, 'cloth', { side: THREE.DoubleSide });
+    const hair = fighterArt.finish(enemy ? 0x68685e : 0x252725, 'leather', { roughness: 1 });
+    const eyes = material(0x35312c, { roughness: .8, metalness: 0 });
+    const skinShadow = material(enemy ? 0x786052 : 0x79563f, { roughness: .92, metalness: 0 });
+    const clothPanel = (parent, mat, x, y, z, panelWidth, panelLength, front = false) => {
       const hinge = new THREE.Group();
       hinge.position.set(x, y, z); parent.add(hinge);
-      mesh(hinge, panelShape, mat, [0, 0, 0], [panelWidth, panelLength, 1]);
+      mesh(hinge, front ? fighterArt.frontPanel : fighterArt.panel, mat, [0, 0, 0], [panelWidth, panelLength, panelWidth]);
       return hinge;
     };
     const body = new THREE.Group();
     body.position.y = 1.05;
     root.add(body);
-    const torso = geometry('fighter-torso', () => new THREE.LatheGeometry([
-      new THREE.Vector2(0, -.21), new THREE.Vector2(.20, -.2), new THREE.Vector2(.225, -.08),
-      new THREE.Vector2(.29, .14), new THREE.Vector2(.315, .28),
-      new THREE.Vector2(.20, .39), new THREE.Vector2(0, .40),
-    ], 12));
-    mesh(body, torso, cloth, [0, 0, 0], [1, 1, .62]);
-    const lapelLeft = mesh(body, box, wrap, [-.065, .16, .175], [.06, .48, .026]);
-    lapelLeft.rotation.z = -.37;
-    const lapelRight = mesh(body, box, clothLight, [.075, .16, .185], [.10, .47, .032]);
-    lapelRight.rotation.z = .32;
-    // Split ceremonial layers and a carved back seal give the rear silhouette detail.
-    clothPanel(body, clothLight, 0, .32, -.18, .52, .54);
-    const backSeal = mesh(body, geometry('fighter-seal', () => new THREE.TorusGeometry(.074, .008, 5, 20)), trim, [0, .14, -.202], [1, 1.15, 1]);
-    mesh(body, box, trim, [0, .14, -.208], [.012, .13, .012]);
-    mesh(body, box, trim, [0, .14, -.208], [.11, .012, .012]);
-    mesh(body, cylinder, skin, [0, .445, 0], [.072, .12, .072]);
-    mesh(body, tapered, clothLight, [0, .39, -.035], [.135, .13, .13]);
-    const necklace = mesh(body, geometry('fighter-cord', () => new THREE.TorusGeometry(.115, .012, 5, 20, Math.PI)), trim, [0, .34, .163], [1, 1, 1]);
-    necklace.rotation.z = Math.PI;
-    mesh(body, octa, trim, [0, .2, .205], [.027, .055, .017]);
-    const head = new THREE.Group();
-    head.position.set(0, .59, 0);
-    body.add(head);
-    mesh(head, sphere, skin, [0, .024, 0], [.131, .175, .127]);
-    mesh(head, sphere, skin, [0, -.064, .025], [.105, .09, .105]);
-    mesh(head, sphere, hair, [0, .105, -.033], [.137, .12, .125]);
-    mesh(head, sphere, hair, [0, .205, -.058], [.057, .06, .06]);
-    mesh(head, cylinder, trim, [0, .192, -.058], [.058, .015, .061]);
-    mesh(head, box, enemy ? armor : cloth, [0, .074, .112], [.235, .032, .027]);
+    mesh(body, fighterArt.torso, cloth);
+    const lapelLeft = clothPanel(body, wrap, -.11, .36, .151, .067, .49, true);
+    lapelLeft.rotation.z = -.39;
+    const lapelRight = clothPanel(body, clothLight, .09, .36, .165, .092, .48, true);
+    lapelRight.rotation.z = .36;
+    // A close drape follows the shoulder blades; straps and stitched seams read from behind.
+    clothPanel(body, clothLight, 0, .285, -.169, .405, .43);
+    const backStrap = mesh(body, box, leather, [-.025, .10, -.205], [.047, .50, .013]);
+    backStrap.rotation.z = -.51;
     for (const sign of [-1, 1]) {
-      mesh(head, sphere, skin, [sign * .13, .015, -.005], [.022, .045, .024]);
-      mesh(head, box, eyes, [sign * .052, .05, .127], [.026, .009, .009], false);
+      const seam = mesh(body, box, wrap, [sign * .15, .065, -.194], [.006, .35, .007]);
+      seam.rotation.z = sign * -.10;
     }
-    mesh(head, octa, enemy ? armor : skin, [0, .012, .13], [.026, .048, .033]);
-    if (enemy) mesh(head, tapered, hair, [0, -.1, .055], [.075, .16, .065]);
+    mesh(body, geometry('fighter-seal', () => new THREE.TorusGeometry(.047, .005, 5, 24)), trim, [.052, .116, -.222], [1, 1.13, 1]);
+    mesh(body, box, trim, [.052, .116, -.224], [.006, .072, .008]);
+    mesh(body, box, trim, [.052, .116, -.224], [.056, .006, .008]);
+    mesh(body, fighterArt.forearm, skin, [0, .442, -.009], [.081, .134, .071]);
+    mesh(body, tapered, clothLight, [0, .385, -.026], [.124, .094, .116]);
+    const necklace = mesh(body, geometry('fighter-cord', () => new THREE.TorusGeometry(.105, .006, 5, 20, Math.PI)), leather, [0, .322, .177], [1, 1, 1]);
+    necklace.rotation.z = Math.PI;
+    mesh(body, octa, trim, [0, .205, .194], [.019, .033, .009]);
+    const head = new THREE.Group();
+    head.position.set(0, .597, .002);
+    body.add(head);
+    mesh(head, fighterArt.head, skin);
+    mesh(head, fighterArt.hair, hair, [0, .002, -.004]);
+    const tiedHair = mesh(head, sphere, hair, [0, .087, -.112], [.052, .044, .058]);
+    tiedHair.rotation.x = -.38;
+    mesh(head, cylinder, leather, [0, .080, -.113], [.053, .012, .048]);
+    for (const sign of [-1, 1]) {
+      mesh(head, sphere, skin, [sign * .108, -.001, -.008], [.018, .034, .019]);
+      mesh(head, sphere, skinShadow, [sign * .119, -.003, .002], [.006, .020, .010]);
+      mesh(head, sphere, skinShadow, [sign * .043, .020, .091], [.025, .009, .008]);
+      mesh(head, sphere, eyes, [sign * .043, .021, .098], [.013, .0045, .005], false);
+      const brow = mesh(head, sphere, hair, [sign * .043, .037, .101], [.027, .005, .006]);
+      brow.rotation.z = sign * -.12;
+    }
+    mesh(head, fighterArt.nose, skin, [0, -.005, .089]);
+    mesh(head, sphere, skinShadow, [0, -.065, .090], [.027, .003, .003]);
+    mesh(head, sphere, skin, [0, -.072, .090], [.024, .005, .005]);
+    if (enemy) mesh(head, fighterArt.beard, hair, [0, -.001, .003]);
     mesh(root, tapered, trousers, [0, .87, 0], [.235, .22, .17]);
-    mesh(root, cylinder, belt, [0, .96, 0], [.245, .075, .188]);
-    mesh(root, box, trim, [0, .96, .195], [.105, .085, .028]);
-    const sash = clothPanel(root, enemy ? wrap : belt, -.11, .93, .176, .14, .53);
-    const sash2 = clothPanel(root, clothLight, .11, .93, .175, .10, .44);
-    const coatLeft = clothPanel(root, cloth, -.12, .94, -.16, .24, .56);
-    const coatRight = clothPanel(root, clothLight, .12, .94, -.16, .22, .50);
-    const leftArm = limb(body, -.315, .33, 0, .29, .29, skin, cloth, wrap);
-    const rightArm = limb(body, .315, .33, 0, .29, .29, skin, cloth, wrap);
-    const leftLeg = limb(root, -.15, .87, 0, .37, .38, skin, trousers, wrap, true);
-    const rightLeg = limb(root, .15, .87, 0, .37, .38, skin, trousers, wrap, true);
-    // Unequal shoulder protection keeps the unarmed silhouette readable from behind.
-    mesh(leftArm.pivot, sphere, armor, [0, -.04, -.008], [.127, .12, .13]);
-    mesh(leftArm.pivot, box, trim, [0, -.09, -.126], [.15, .025, .018]);
-    mesh(rightArm.pivot, geometryCache.get('fighter-muscle'), clothLight, [0, -.12, 0], [.098, .23, .09]);
+    mesh(root, cylinder, leather, [0, .958, 0], [.237, .085, .179]);
+    mesh(root, cylinder, belt, [0, .965, 0], [.241, .037, .183]);
+    mesh(root, box, trim, [0, .96, .186], [.069, .055, .018]);
+    mesh(root, box, leather, [0, .96, .198], [.043, .032, .008]);
+    const sash = clothPanel(root, enemy ? wrap : belt, -.095, .93, .170, .105, .49, true);
+    const sash2 = clothPanel(root, clothLight, .08, .93, .172, .082, .40, true);
+    const coatLeft = clothPanel(root, cloth, -.115, .94, -.164, .215, .50);
+    const coatRight = clothPanel(root, clothLight, .115, .94, -.166, .198, .46);
+    const leftArm = limb(body, -.292, .31, 0, .29, .285, skin, cloth, wrap, leather);
+    const rightArm = limb(body, .292, .31, 0, .29, .285, skin, cloth, wrap, leather);
+    const leftLeg = limb(root, -.137, .865, 0, .39, .39, skin, trousers, wrap, leather, true);
+    const rightLeg = limb(root, .137, .865, 0, .39, .39, skin, trousers, wrap, leather, true);
+    mesh(leftArm.pivot, fighterArt.pauldron, armor, [0, -.015, -.006], [.125, .22, .129]);
+    mesh(leftArm.pivot, fighterArt.pauldron, trim, [0, -.060, -.005], [.127, .075, .132]);
+    mesh(rightArm.pivot, fighterArt.upperArm, clothLight, [0, -.05, -.002], [.090, .17, .088]);
     for (const arm of [leftArm, rightArm]) {
-      mesh(arm.joint, box, armor, [0, -.16, -.065], [.09, .15, .027]);
-      mesh(arm.joint, box, trim, [0, -.16, -.083], [.015, .115, .01]);
+      mesh(arm.joint, fighterArt.pauldron, leather, [0, -.139, -.002], [.058, .19, .058]);
+      mesh(arm.joint, box, armor, [0, -.132, -.055], [.065, .126, .013]);
+      mesh(arm.joint, box, trim, [0, -.132, -.065], [.007, .096, .005]);
+      for (const sign of [-1, 1]) mesh(arm.joint, sphere, trim, [sign * .023, -.094, -.064], [.005, .005, .004]);
     }
     const mantle = new THREE.Group();
     [-1, 1].forEach(sign => {
-      const shoulder = mesh(mantle, tapered, armor, [sign * .28, .38, -.045], [.17, .15, .22]);
-      shoulder.rotation.z = sign * .45;
-      const spike = mesh(mantle, octa, trim, [sign * .32, .51, -.08], [.045, .19, .055]);
-      spike.rotation.z = sign * -.4;
+      const shoulder = mesh(mantle, fighterArt.pauldron, armor, [sign * .26, .34, -.025], [.148, .25, .163]);
+      shoulder.rotation.z = sign * -.27;
+      const rim = mesh(mantle, fighterArt.pauldron, trim, [sign * .28, .285, -.028], [.151, .065, .166]);
+      rim.rotation.z = sign * -.27;
+      const fin = mesh(mantle, octa, armor, [sign * .26, .443, -.055], [.025, .115, .066]);
+      fin.rotation.z = sign * -.25;
     });
-    mesh(mantle, tapered, armor, [0, .39, -.105], [.18, .25, .14]);
+    mesh(mantle, fighterArt.pauldron, leather, [0, .32, -.09], [.16, .25, .12]);
     body.add(mantle);
     mantle.visible = false;
     scene.add(root);
     const footprint = new THREE.Group();
-    const footMat = basic(enemy ? 0xca7653 : STYLE_COLORS[0], { transparent: true, opacity: .65, depthWrite: false });
-    ring(footprint, .49, .012, footMat, .052, 48);
-    ring(footprint, .55, .006, footMat, .052, 48);
-    const direction = mesh(footprint, geometry('direction', () => new THREE.ConeGeometry(.065, .15, 3)), footMat, [0, .05, .68], [1, 1, 1], false);
+    const footMat = basic(enemy ? 0xca7653 : STYLE_COLORS[0], { transparent: true, opacity: .18, depthWrite: false });
+    const markerArc = geometry('fighter-marker-arc', () => new THREE.TorusGeometry(.46, .005, 4, 20, Math.PI * .26));
+    for (const sign of [-1, 1]) {
+      const marker = mesh(footprint, markerArc, footMat, [0, .052, 0], [1, 1, 1], false);
+      marker.rotation.set(Math.PI / 2, 0, sign > 0 ? -.41 : Math.PI - .41);
+    }
+    const direction = mesh(footprint, geometry('direction', () => new THREE.ConeGeometry(.035, .075, 3)), footMat, [0, .05, .53], [1, 1, 1], false);
     direction.rotation.x = Math.PI / 2;
     scene.add(footprint);
-    const shadow = mesh(scene, geometry('shadow', () => new THREE.CircleGeometry(.48, 32)), basic(0x080b0e, { transparent: true, opacity: .3, depthWrite: false }), [0, .04, 0], [1, 1, 1], false);
+    const contactMaterial = basic(0x06090c, { map: contactMap, transparent: true, opacity: .48, depthWrite: false });
+    contactUsers++;
+    contactMaterial.addEventListener('dispose', () => { if (--contactUsers === 0) contactMap.dispose(); });
+    const shadow = mesh(scene, geometry('fighter-contact-shadow', () => new THREE.PlaneGeometry(1.12, .92)), contactMaterial, [0, .04, 0], [1, 1, 1], false);
     shadow.rotation.x = -Math.PI / 2;
     const indicator = new THREE.Group();
     const indicatorBack = mesh(indicator, geometry('healthback', () => new THREE.PlaneGeometry(.85, .052)), basic(0x0b1015, { transparent: true, opacity: .8, depthTest: false }), [0, 0, 0], [1, 1, 1], false);
@@ -517,7 +639,7 @@ export function createRenderer(canvas) {
     rig.coneMat.color.setHex(state === 'active' ? enemy ? 0xec804b : 0xe6dcc0 : attack.sweep ? 0xd57e68 : 0xe9ad64);
   }
 
-  function updateFighter(rig, f, dt, elapsed, enemy, mode) {
+  function updateFighter(rig, f, dt, elapsed, enemy, mode, playing) {
     if (!f) { rig.root.visible = rig.footprint.visible = rig.shadow.visible = rig.indicator.visible = false; return; }
     rig.root.visible = rig.footprint.visible = rig.shadow.visible = true;
     const state = String(f.state || 'idle').toLowerCase();
@@ -525,7 +647,8 @@ export function createRenderer(canvas) {
     const targetScale = enemy && mode === 'boss' ? 1.15 : 1;
     rig.root.scale.setScalar(targetScale);
     rig.mantle.visible = enemy && mode === 'boss';
-    rig.belt.color.setHex(enemy ? mode === 'boss' ? 0xa8543c : 0x81918d : STYLE_COLORS[style]);
+    rig.belt.color.setHex(enemy ? mode === 'boss' ? 0x8d5440 : 0x6e7770 : STYLE_COLORS[style]);
+    if (!enemy) rig.belt.color.multiplyScalar(.62);
     rig.footMat.color.setHex(f.invulnerable ? 0xe0f4e8 : enemy ? 0xdd8968 : STYLE_COLORS[style]);
     const p = updateFighterMotion(rig.motion, f, dt, elapsed, enemy);
     const time = rig.motion.stanceTime;
@@ -557,9 +680,9 @@ export function createRenderer(canvas) {
     rig.skin.emissive.setRGB(rig.motion.impact * .055, rig.motion.impact * .018, 0);
     rig.footprint.position.set(f.x, 0, f.z);
     rig.footprint.rotation.y = f.yaw || 0;
-    rig.footMat.opacity = state === 'dead' ? .2 : .65;
+    rig.footMat.opacity = state === 'dead' ? 0 : f.invulnerable ? .38 : enemy ? .13 : .19;
     rig.shadow.position.set(f.x, .04, f.z);
-    rig.indicator.visible = f.health > 0 && (enemy || f.health < f.maxHealth);
+    rig.indicator.visible = playing && f.health > 0 && (enemy || f.health < f.maxHealth);
     rig.indicator.position.set(f.x, targetScale * 2.15, f.z);
     rig.indicator.quaternion.copy(camera.quaternion);
     const fraction = clamp(f.health / (f.maxHealth || 100), 0, 1);
@@ -569,6 +692,7 @@ export function createRenderer(canvas) {
   }
 
   function resetCamera(game) {
+    game = renderState(game);
     const player = game?.player;
     if (!player) return;
     const enemy = game.enemy;
@@ -688,6 +812,7 @@ export function createRenderer(canvas) {
   }
 
   function cameraSnapshot(game) {
+    game = renderState(game);
     camera.updateMatrixWorld(true);
     const plain = value => ({ x: value.x, y: value.y, z: value.z });
     const project = (fighter, y) => fighter
@@ -709,34 +834,42 @@ export function createRenderer(canvas) {
     fitResolution();
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
-    camera.fov = camera.aspect < .85 ? 66 : camera.aspect < 1.2 ? 62 : 58;
+    baseFov = camera.aspect < .85 ? 66 : camera.aspect < 1.2 ? 62 : 58;
+    camera.fov = baseFov;
     camera.updateProjectionMatrix();
   }
 
   function render(game, dt = 1 / 60, elapsed = 0, locked = true) {
     dt = clamp(dt || 0, 0, .1);
     elapsed = Number.isFinite(elapsed) ? elapsed : game.elapsed || 0;
+    const view = renderState(game);
     if (lastMode !== game.mode || (previousResult && previousResult !== 'playing' && game.result === 'playing')) {
       lastMode = game.mode;
-      resetCamera(game);
+      resetCamera(view);
     }
     previousResult = game.result;
     // Leave the left side of the menu for the encounter selector. Combat is centered.
     const menuOffset = !game.presentationPlaying && camera.aspect > 1.25 ? -Math.min(10, camera.aspect * 5) : 0;
-    if (camera.filmOffset !== menuOffset) {
+    const effort = game.presentationPlaying && !reducedMotion.matches ? (game.player.sprintBlend || 0) : 0;
+    const desiredFov = baseFov + 3.8 * effort;
+    const fovDelta = desiredFov - camera.fov;
+    if (camera.filmOffset !== menuOffset || Math.abs(fovDelta) > .001) {
+      camera.fov += Math.abs(fovDelta) < .012 ? fovDelta : fovDelta * (1 - Math.exp(-7 * dt));
       camera.filmOffset = menuOffset;
       camera.updateProjectionMatrix();
     }
-    updateCamera(game, dt, locked);
-    updateFighter(fighters.player, game.player, dt, elapsed, false, game.mode);
-    updateFighter(fighters.enemy, game.enemy, dt, elapsed, true, game.mode);
+    updateCamera(view, dt, locked);
+    updateFighter(fighters.player, view.player, dt, elapsed, false, view.mode, view.presentationPlaying);
+    updateFighter(fighters.enemy, view.enemy, dt, elapsed, true, view.mode, view.presentationPlaying);
     for (const batch of rigBatches) batch.sync();
     flames.forEach(flame => {
-      const pulse = 1 + Math.sin(elapsed * 8.5 + flame.phase) * .12 + Math.sin(elapsed * 17 + flame.phase) * .05;
-      flame.outer.scale.set(.23 * (2 - pulse), .52 * pulse, .23 * (2 - pulse));
-      flame.outer.rotation.y = elapsed * .6 + flame.phase;
-      flame.inner.scale.y = .3 * pulse;
-      flame.light.intensity = 8.5 * pulse;
+      const pulse = 1 + Math.sin(elapsed * 11.7 + flame.phase) * .045
+        + Math.sin(elapsed * 17.9 + flame.phase) * .025 + Math.sin(elapsed * 4.1 + flame.phase) * .045;
+      flame.outer.scale.set(.72, 1.08 * pulse, 1);
+      flame.outer.rotation.y = Math.atan2(camera.position.x - flame.x, camera.position.z - flame.z);
+      flame.outer.material.uniforms.time.value = elapsed;
+      flame.inner.scale.set(1.25 * pulse, 1.5 * pulse, 1);
+      flame.light.intensity = 22 * pulse;
     });
     for (let i = 0; i < dustCount; i++) {
       const d = dustBase[i];
@@ -744,6 +877,7 @@ export function createRenderer(canvas) {
       dustPositions[i * 3 + 1] = (d.y + elapsed * d.speed) % 5.5;
       dustPositions[i * 3 + 2] = d.z + Math.cos(elapsed * .2 + d.phase) * .15;
     }
+    bannerWind.value = reducedMotion.matches ? 0 : elapsed;
     dustGeo.attributes.position.needsUpdate = true;
     for (let i = 0; i < particleCount; i++) {
       const p = particleState[i];
@@ -767,7 +901,7 @@ export function createRenderer(canvas) {
       wave.item.scale.setScalar(.25 + p * wave.radius);
       wave.mat.opacity = (1 - p) * .7;
     }
-    renderer.render(scene, camera);
+    if (skyReady()) renderer.render(scene, camera);
   }
 
   function dispose() {
@@ -781,5 +915,6 @@ export function createRenderer(canvas) {
   }
   resize();
   const stats = () => ({ renderScale, pixelRatio: renderer.getPixelRatio(), calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, staticBatches: staticInstances.length });
-  return { render, resize, burst, dispose, stats, resetCamera, orbit, movementBasis, cameraSnapshot, trackFrameTime };
+  const footstepBeat = id => Math.floor(fighters[id].motion.phase / Math.PI);
+  return { render, resize, burst, dispose, stats, resetCamera, orbit, movementBasis, cameraSnapshot, trackFrameTime, footstepBeat };
 }

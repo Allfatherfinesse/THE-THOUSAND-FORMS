@@ -6,10 +6,33 @@ const mix = (a, b, t) => a + (b - a) * t;
 const KEYS = ['la', 'ra', 'laz', 'raz', 'lay', 'ray', 'le', 're', 'll', 'rl', 'llz', 'rlz',
   'lk', 'rk', 'lf', 'rf', 'bx', 'by', 'bz', 'hx', 'hy', 'hz', 'rootY', 'lean', 'sway', 'fall'];
 
+function gaitLeg(pose, left, phase, amount, sprint, forward, sideways) {
+  const cycle = ((phase / (Math.PI * 2)) % 1 + 1) % 1;
+  const duty = mix(.64, .26, sprint);
+  const planted = cycle < duty;
+  const progress = planted ? cycle / duty : (cycle - duty) / (1 - duty);
+  const travel = planted ? 1 - progress * 2 : -1 + smooth(progress) * 2;
+  const reach = mix(.20, .31, sprint);
+  const footZ = travel * reach * forward;
+  const lift = planted ? 0 : Math.sin(progress * Math.PI) * mix(.09, .18, sprint);
+  const vertical = mix(.726, .700, sprint) - lift;
+  const distance = Math.min(.778, Math.hypot(footZ, vertical));
+  const knee = 2 * Math.acos(clamp(distance / .78));
+  const hip = -Math.atan2(footZ, vertical) - knee * .5;
+  const toe = planted ? smooth((progress - .74) / .26) * .22 : -.16 * Math.sin(progress * Math.PI);
+  const hipKey = left ? 'll' : 'rl', kneeKey = left ? 'lk' : 'rk';
+  const ankleKey = left ? 'lf' : 'rf', sideKey = left ? 'llz' : 'rlz';
+  pose[hipKey] = mix(pose[hipKey], hip, amount);
+  pose[kneeKey] = mix(pose[kneeKey], knee, amount);
+  // The ankle counter-rotates the thigh and shin during the planted phase.
+  pose[ankleKey] = mix(pose[ankleKey], -hip - knee + toe, amount);
+  pose[sideKey] += travel * sideways * .20 * amount;
+}
+
 export function createFighterMotion() {
   const pose = {}, target = {};
   for (const key of KEYS) pose[key] = target[key] = 0;
-  return { pose, target, phase: 0, speed: 0, impact: 0, previousHealth: null,
+  return { pose, target, phase: 0, sourcePhase: 0, speed: 0, sprint: 0, impact: 0, previousHealth: null,
     previousState: '', previousSequence: 0, lastX: null, lastZ: null, ready: false,
     stanceTime: 0, resetMarker: null };
 }
@@ -26,9 +49,9 @@ export function updateFighterMotion(motion, fighter, dt, elapsed, enemy = false)
   const movedZ = reset || motion.lastZ === null ? 0 : fighter.z - motion.lastZ;
   // A new fighter object means encounter reset. Never blend out of an old corpse.
   if (reset) {
-    motion.ready = false; motion.impact = 0; motion.speed = 0;
+    motion.ready = false; motion.impact = 0; motion.speed = 0; motion.sprint = 0;
     motion.previousHealth = fighter.health; motion.previousState = '';
-    motion.phase = 0; motion.resetMarker = fighter;
+    motion.phase = 0; motion.sourcePhase = fighter.movePhase || 0; motion.resetMarker = fighter;
   }
   const vx = Number.isFinite(fighter.vx) ? fighter.vx : dt > 0 ? movedX / dt : 0;
   const vz = Number.isFinite(fighter.vz) ? fighter.vz : dt > 0 ? movedZ / dt : 0;
@@ -36,14 +59,22 @@ export function updateFighterMotion(motion, fighter, dt, elapsed, enemy = false)
   motion.lastX = fighter.x; motion.lastZ = fighter.z;
   const locomotion = state === 'idle' || state === 'guard' || state === 'recovery';
   motion.speed += ((locomotion ? actualSpeed : 0) - motion.speed) * (1 - Math.exp(-dt * 18));
-  if (Number.isFinite(fighter.movePhase)) motion.phase = fighter.movePhase;
-  else if (locomotion) motion.phase += actualSpeed * dt * 4;
+  const desiredSprint = state === 'idle' ? clamp(Number.isFinite(fighter.sprintBlend)
+    ? fighter.sprintBlend : fighter.sprinting ? 1 : 0) : 0;
+  motion.sprint += (desiredSprint - motion.sprint) * (1 - Math.exp(-dt * 14));
+  // Accumulate distance instead of rescaling the whole phase as sprint changes.
+  // The longer running stride has a lower cadence per metre than the combat step.
+  const cadence = mix(.62, .50, motion.sprint);
+  if (Number.isFinite(fighter.movePhase)) {
+    motion.phase += Math.max(0, fighter.movePhase - motion.sourcePhase) * cadence;
+    motion.sourcePhase = fighter.movePhase;
+  } else if (locomotion) motion.phase += actualSpeed * dt * 4 * cadence;
   motion.stanceTime += dt;
-  const stride = clamp(motion.speed / 3.8);
+  const stride = clamp(motion.speed / 3.9);
   const forward = actualSpeed > .05 ? clamp((vx * sin + vz * cos) / actualSpeed, -1, 1) : 0;
   const side = actualSpeed > .05 ? clamp((vx * cos - vz * sin) / actualSpeed, -1, 1) : 0;
   const phase = motion.phase;
-  const gait = Math.sin(phase), reverseGait = Math.sin(phase + Math.PI);
+  const gait = Math.sin(phase), sprint = motion.sprint;
   const breath = Math.sin(motion.stanceTime * 2.3 + (enemy ? 1.1 : 0));
   const weight = Math.sin(motion.stanceTime * 1.05 + (enemy ? 2 : 0));
   const age = clamp((fighter.stateTime || 0) / Math.max(.001, fighter.stateDuration || 1));
@@ -64,18 +95,21 @@ export function updateFighterMotion(motion, fighter, dt, elapsed, enemy = false)
   }
   if (stride > .001) {
     const guarded = state === 'guard' ? .64 : 1;
-    p.ll += gait * .48 * stride * forward * guarded;
-    p.rl += reverseGait * .48 * stride * forward * guarded;
-    p.llz += gait * side * .27 * stride;
-    p.rlz += reverseGait * side * .27 * stride;
-    p.lk += Math.max(0, -gait) * .56 * stride;
-    p.rk += Math.max(0, -reverseGait) * .56 * stride;
+    gaitLeg(p, true, phase, stride * guarded, sprint, forward, side);
+    gaitLeg(p, false, phase + Math.PI, stride * guarded, sprint, forward, side);
+    p.la = mix(p.la, -.25 - gait * .62, sprint * stride);
+    p.ra = mix(p.ra, -.25 + gait * .62, sprint * stride);
+    p.le = mix(p.le, -1.32 + gait * .15, sprint * stride);
+    p.re = mix(p.re, -1.32 - gait * .15, sprint * stride);
     p.la -= gait * .13 * stride; p.ra += gait * .13 * stride;
-    p.by += gait * .085 * stride; p.hy -= gait * .06 * stride;
-    p.bx += forward * .055 * stride; p.bz -= side * .06 * stride;
-    p.sway += gait * .019 * stride;
-    p.rootY += Math.abs(Math.cos(phase)) * .027 * stride - .018 * stride;
-    p.lf = -p.ll * .35 - p.lk * .3; p.rf = -p.rl * .35 - p.rk * .3;
+    p.by = mix(p.by, 0, sprint * stride) + gait * mix(.085, .14, sprint) * stride;
+    p.hy = -p.by * .65;
+    p.bx += forward * mix(.055, .22, sprint) * stride;
+    p.hx -= forward * .11 * sprint * stride;
+    p.bz -= side * .07 * stride;
+    p.sway += gait * .012 * stride;
+    p.rootY += Math.abs(Math.sin(phase * 2)) * mix(.012, .028, sprint) * stride - .023 * stride - .026 * sprint * stride;
+    p.lean += .025 * sprint * stride;
   }
 
   const attack = fighter.attack;

@@ -411,7 +411,245 @@ test('new motion and combo fields reset with the encounter', () => {
   assert.ok(game.player.weightShift > 0);
   game.reset('boss');
   for (const fighter of [game.player, game.enemy]) {
-    for (const field of ['vx', 'vz', 'speed', 'movePhase', 'weightShift', 'comboIndex']) assert.equal(fighter[field], 0);
+    for (const field of ['vx', 'vz', 'speed', 'movePhase', 'weightShift', 'comboIndex', 'sprintBlend']) assert.equal(fighter[field], 0);
+    assert.equal(fighter.sprinting, false);
+    assert.equal(fighter.sprintExhausted, false);
     assert.equal(fighter.footwork, 'idle');
   }
+});
+
+test('held sprint ramps smoothly to a useful speed for every style', () => {
+  for (let style = 0; style < 3; style++) {
+    const game = isolated('sparring', 7);
+    game.player.style = style;
+    game.update(FRAME, { x: 1, z: 0, sprint: true });
+    assert.equal(game.player.sprinting, true);
+    assert.ok(game.player.speed > 0 && game.player.speed < 1);
+    assert.ok(game.player.sprintBlend > 0 && game.player.sprintBlend < 1);
+    advance(game, .35, { x: 1, z: 0, sprint: true });
+    near(game.player.speed, (style === 2 ? 4.65 : 4.3) * 1.6);
+    near(game.player.sprintBlend, 1);
+    assert.equal(game.player.state, 'idle');
+  }
+});
+
+test('sprint drains stamina only during motion and never while still or against a wall', () => {
+  const game = isolated('sparring', 7);
+  advance(game, .5, { sprint: true });
+  assert.equal(game.player.sprinting, false);
+  near(game.player.stamina, 100);
+  advance(game, .5, { x: 1, z: 0, sprint: true });
+  near(game.player.stamina, 91);
+  assert.equal(game.player.sprinting, true);
+
+  const blocked = isolated('sparring', 7);
+  blocked.player.x = blocked.arenaRadius - blocked.player.radius;
+  advance(blocked, .5, { x: 1, z: 0, sprint: true });
+  assert.equal(blocked.player.sprinting, false);
+  near(blocked.player.stamina, 100);
+  near(blocked.player.sprintBlend, 0);
+  near(blocked.player.speed, 0);
+});
+
+test('diagonal sprint is normalized to the same speed and stamina cost', () => {
+  const straight = isolated('sparring', 7), diagonal = isolated('sparring', 7);
+  advance(straight, .6, { x: 1, z: 0, sprint: true });
+  advance(diagonal, .6, { x: 1, z: 1, sprint: true });
+  near(diagonal.player.speed, straight.player.speed, .00001);
+  near(Math.hypot(diagonal.player.x, diagonal.player.z), straight.player.x, .00001);
+  near(diagonal.player.stamina, straight.player.stamina, .00001);
+});
+
+test('releasing sprint eases into running and reversing direction remains responsive', () => {
+  const game = isolated('sparring', 7);
+  advance(game, .3, { x: 1, z: 0, sprint: true });
+  const speed = game.player.speed, stamina = game.player.stamina;
+  game.update(FRAME, { x: 1, z: 0 });
+  assert.equal(game.player.sprinting, false);
+  assert.ok(game.player.speed < speed && game.player.speed > 4.3);
+  assert.ok(game.player.sprintBlend > 0 && game.player.sprintBlend < 1);
+  near(game.player.stamina, stamina);
+  advance(game, .2, { x: 1, z: 0 });
+  near(game.player.speed, 4.3);
+  near(game.player.sprintBlend, 0);
+
+  advance(game, .3, { x: 1, z: 0, sprint: true });
+  advance(game, .2, { x: -1, z: 0, sprint: true });
+  assert.ok(game.player.vx < -6);
+  advance(game, .2);
+  near(game.player.speed, 0);
+  near(game.player.sprintBlend, 0);
+});
+
+test('guard, attacks and dodges interrupt sprint immediately without extra sprint drain', () => {
+  for (const action of ['guard', 'light', 'evade', 'style']) {
+    const game = isolated('sparring', 7);
+    advance(game, .25, { x: 1, z: 0, sprint: true });
+    assert.equal(game.player.sprinting, true);
+    if (action === 'guard') game.setGuard(true);
+    else assert.equal(game.action(action), true);
+    assert.equal(game.player.sprinting, false);
+    const paid = game.player.stamina;
+    advance(game, .10, { x: 1, z: 0, sprint: true });
+    assert.equal(game.player.sprinting, false);
+    near(game.player.stamina, paid);
+    if (action === 'guard') assert.ok(game.player.speed <= 4.3 * .45 + .01);
+    if (action === 'evade') {
+      assert.equal(game.player.state, 'evade');
+      assert.equal(game.player.invulnerable, true);
+    }
+  }
+});
+
+test('sprint resumes after an action only while its hold remains active', () => {
+  const held = isolated('sparring', 7);
+  held.setInput({ x: 1, z: 0, sprint: true });
+  held.action('evade');
+  advance(held, .6, { x: 1, z: 0, sprint: true });
+  assert.equal(held.player.sprinting, true);
+  assert.equal(held.player.state, 'idle');
+
+  const released = isolated('sparring', 7);
+  released.setInput({ x: 1, z: 0, sprint: true });
+  released.action('evade');
+  advance(released, .6, { x: 1, z: 0 });
+  assert.equal(released.player.sprinting, false);
+  near(released.player.speed, 4.3);
+});
+
+test('releasing all input clears paused sprint presentation without advancing simulation', () => {
+  const game = isolated('sparring', 7);
+  advance(game, .25, { x: 1, z: 0, sprint: true });
+  assert.equal(game.player.sprinting, true);
+  const time = game.time, stamina = game.player.stamina, position = game.player.x;
+  game.setInput({ x: 0, z: 0, sprint: false });
+  assert.equal(game.player.sprinting, false);
+  assert.equal(game.player.sprintBlend, 0);
+  assert.equal(game.time, time);
+  assert.equal(game.player.stamina, stamina);
+  assert.equal(game.player.x, position);
+});
+
+test('exhaustion keeps sprint off until a meaningful stamina reserve recovers', () => {
+  const game = isolated('sparring', 7);
+  game.arenaRadius = 100;
+  game.player.stamina = 6;
+  advance(game, .4, { x: 1, z: 0, sprint: true });
+  assert.equal(game.player.sprintExhausted, true);
+  assert.equal(game.player.sprinting, false);
+  near(game.player.stamina, 0);
+  advance(game, .8, { x: 1, z: 0, sprint: true });
+  assert.ok(game.player.stamina > 0 && game.player.stamina < 20);
+  assert.equal(game.player.sprinting, false);
+  assert.equal(game.player.sprintExhausted, true);
+  advance(game, .4, { x: 1, z: 0, sprint: true });
+  assert.equal(game.player.sprintExhausted, false);
+  assert.equal(game.player.sprinting, true);
+  assert.ok(game.player.stamina > 0);
+});
+
+test('sprint speed, exhaustion and transitions are fixed-step deterministic', () => {
+  const slow = isolated('sparring', 7), fast = isolated('sparring', 7);
+  slow.arenaRadius = fast.arenaRadius = 100;
+  slow.player.stamina = fast.player.stamina = 16;
+  for (let frame = 0; frame < 120; frame++) {
+    const input = { x: frame < 60 ? 1 : -1, z: .2, sprint: frame < 90 };
+    slow.update(1 / 30, input);
+    for (let substep = 0; substep < 4; substep++) fast.update(FRAME, input);
+  }
+  for (const field of ['x', 'z', 'vx', 'vz', 'speed', 'movePhase', 'stamina', 'sprintBlend'])
+    near(slow.player[field], fast.player[field], .00001);
+  assert.equal(slow.player.sprinting, fast.player.sprinting);
+  assert.equal(slow.player.sprintExhausted, fast.player.sprintExhausted);
+});
+
+test('render interpolation advances both actors between fixed simulation steps', () => {
+  const game = new Game();
+  advance(game, .25, { x: 1, z: 0 });
+  const view = game.getRenderState();
+  let betweenSteps = 0;
+  for (let frame = 0; frame < 16; frame++) {
+    const rawPlayerX = game.player.x, rawEnemyZ = game.enemy.z;
+    const playerX = view.player.x, playerZ = view.player.z;
+    const enemyX = view.enemy.x, enemyZ = view.enemy.z;
+    game.update(FRAME / 4, { x: 1, z: 0 });
+    assert.equal(game.getRenderState(), view, 'Reuse the sampled world object');
+    if (game.player.x === rawPlayerX && game.enemy.z === rawEnemyZ) {
+      betweenSteps++;
+      assert.ok(Math.hypot(view.player.x - playerX, view.player.z - playerZ) > .0001);
+      assert.ok(Math.hypot(view.enemy.x - enemyX, view.enemy.z - enemyZ) > .0001);
+    }
+    assert.ok(view.alpha >= 0 && view.alpha <= 1);
+    assert.ok(view.player.x <= game.player.x + 1e-8);
+    assert.ok(game.player.x - view.player.x < 4.3 * FRAME + .001);
+  }
+  assert.ok(betweenSteps >= 10, 'Exercise high-refresh frames with no simulation tick');
+});
+
+test('stable render views inherit live combat clocks without mutating authoritative snapshots', () => {
+  const game = isolated('sparring', 7);
+  advance(game, .2, { x: 1, z: 0 });
+  const first = game.getRenderState(), playerView = first.player, enemyView = first.enemy;
+  assert.notEqual(playerView, game.player);
+  game.action('heavy');
+  game.update(FRAME / 2);
+  const before = { x: game.player.x, z: game.player.z, yaw: game.player.yaw,
+    time: game.time, stateTime: game.player.stateTime, stamina: game.player.stamina };
+  const next = game.getRenderState();
+  assert.equal(next.player, playerView);
+  assert.equal(next.enemy, enemyView);
+  assert.equal(playerView.state, game.player.state);
+  assert.equal(playerView.stateTime, game.player.stateTime);
+  assert.equal(playerView.attack, game.player.attack);
+  assert.deepEqual({ x: game.player.x, z: game.player.z, yaw: game.player.yaw,
+    time: game.time, stateTime: game.player.stateTime, stamina: game.player.stamina }, before);
+});
+
+test('render reset and direct camera placements snap both histories and preserve encounter identity', () => {
+  const game = isolated('sparring', 7);
+  advance(game, .2, { x: 1, z: 0 });
+  const before = game.getRenderState(), oldPlayer = before.player;
+  game.player.x = 8.4; game.player.z = 0; game.player.yaw = .7;
+  game.enemy.x = 6.7; game.enemy.z = 0;
+  const placed = game.getRenderState();
+  assert.equal(placed.player, oldPlayer, 'Placement does not restart the animation rig');
+  near(placed.player.x, 8.4, .00001);
+  near(placed.player.z, 0, .00001);
+  near(placed.player.yaw, .7, .00001);
+  near(placed.enemy.x, 6.7, .00001);
+  game.update(FRAME / 4);
+  near(game.getRenderState().player.x, 8.4, .00001);
+
+  game.reset('boss');
+  const fresh = game.getRenderState();
+  assert.notEqual(fresh, before);
+  assert.notEqual(fresh.player, oldPlayer, 'A new encounter resets fighter-motion identity');
+  assert.equal(fresh.player.x, game.player.x);
+  assert.equal(fresh.player.z, game.player.z);
+  assert.equal(fresh.enemy.health, 250);
+  assert.equal(fresh.alpha, 0);
+});
+
+test('render yaw follows the short arc across the angle seam', () => {
+  const game = isolated('sparring', 7);
+  game.player.yaw = Math.PI - .01;
+  game.getRenderState();
+  const desiredYaw = -Math.PI + .02;
+  const input = { aimX: Math.sin(desiredYaw), aimZ: Math.cos(desiredYaw) };
+  game.update(FRAME, input);
+  game.update(FRAME / 2, input);
+  assert.ok(Math.abs(game.getRenderState().player.yaw) > 3.1);
+});
+
+test('terminal presentation uses the final authoritative position', () => {
+  const game = isolated();
+  game.enemy.health = 1;
+  game.action('light');
+  advance(game, .2);
+  assert.equal(game.result, 'won');
+  const view = game.getRenderState();
+  assert.equal(view.alpha, 1);
+  near(view.player.x, game.player.x, .00001);
+  near(view.player.z, game.player.z, .00001);
+  assert.equal(view.enemy.state, 'dead');
 });

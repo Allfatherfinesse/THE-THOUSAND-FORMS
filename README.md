@@ -9,7 +9,7 @@ A mythological dark-fantasy combat project. Read [AGENTS.md](AGENTS.md),
 
 Fight beneath the eclipse in a ruined Gothic sanctuary. The camera follows over your fighter’s shoulder and locks onto the opponent at the
 start of each encounter. Press **Tab** or tap the target icon for free look. Use
-the expand button for fullscreen play. [Publication record](docs/APP_PUBLICATION.md).
+the expand button for fullscreen play. Hold **Shift** while moving to sprint. On touch, tap **Sprint** and move the stick. [Publication record](docs/APP_PUBLICATION.md).
 
 [The Ashen Courtyard](Browser/README.md) is a playable 3D browser prototype with
 three provisional styles, a sparring partner and a two-phase boss. It includes

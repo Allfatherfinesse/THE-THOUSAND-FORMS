@@ -17,18 +17,19 @@ const observe = page => {
   page.on('response', r => { if (r.status() >= 400) errors.push(`${r.status()} ${r.url()}`); });
 };
 const snapshot = page => page.evaluate(() => window.__THOUSAND_FORMS__.snapshot());
-const waitState = (page, state) => page.waitForFunction(state => window.__THOUSAND_FORMS__.snapshot().player.state === state, state, { timeout: 15000 });
+const waitState = (page, state) => page.waitForFunction(state => window.__THOUSAND_FORMS__.snapshot().player.state === state, state, { polling: 60, timeout: 30000 });
 
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   observe(page);
   const response = await page.goto(baseURL, { waitUntil: 'networkidle' });
   assert.equal(response.status(), 200);
+  await page.waitForFunction(() => window.__THOUSAND_FORMS__?.snapshot().renderStats?.calls > 0, null, { polling: 100, timeout: 60000 });
   assert.equal((await snapshot(page)).started, false);
   await page.screenshot({ path: 'artifacts/courtyard-menu.png' });
   checks.push('Desktop menu renders and assets load');
   // Software WebGL is used in CI; use a smaller viewport during long input replay.
-  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.setViewportSize({ width: 860, height: 580 });
   await page.locator('[data-start]').click();
   assert.equal((await snapshot(page)).started, true);
 
@@ -74,7 +75,8 @@ try {
   checks.push('Pause freezes combat; restart restores encounter');
 
   // Fight through the actual keyboard/UI path, reading only the public QA snapshot.
-  for (let tries = 0; tries < 600; tries++) {
+  const replayDeadline = Date.now() + 180000;
+  for (let tries = 0; Date.now() < replayDeadline; tries++) {
     const s = await snapshot(page);
     if (s.result !== 'playing') break;
     const distance = Math.hypot(s.enemy.x - s.player.x, s.enemy.z - s.player.z);

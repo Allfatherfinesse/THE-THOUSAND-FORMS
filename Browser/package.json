@@ -6,7 +6,7 @@
   "scripts": {
     "test": "node tests/combat.test.mjs",
     "start": "python3 -m http.server 4173 --directory dist",
-    "build": "esbuild dist/main.js --bundle --minify --format=iife --outfile=dist/game.bundle.js"
+    "build": "esbuild dist/main.js --bundle --minify --format=iife --loader:.jpg=dataurl --outfile=dist/game.bundle.js"
   },
   "devDependencies": {
     "esbuild": "0.25.12"

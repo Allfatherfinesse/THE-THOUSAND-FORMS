@@ -16,7 +16,7 @@
 </head>
 <body>
   <main class="game-shell" aria-label="The Thousand Forms combat arena">
-    <canvas id="arena" aria-label="Three-dimensional training courtyard. Use WASD to move, J to attack, F to guard, and Space to evade." tabindex="0"></canvas>
+    <canvas id="arena" aria-label="Three-dimensional training courtyard. Use WASD to move, hold Shift to sprint, J to attack, F to guard, and Space to evade." tabindex="0"></canvas>
     <div class="scene-vignette" aria-hidden="true"></div>
 
     <header class="topbar">
@@ -46,7 +46,7 @@
     </header>
 
     <section class="combat-hud player-panel" aria-label="Player status">
-      <div class="panel-heading"><span class="eyebrow">THE SEEKER</span><span class="small-label">YOU</span></div>
+      <div class="panel-heading"><span class="eyebrow">THE SEEKER</span><span class="small-label" id="movement-status">YOU</span></div>
       <div class="meter-label"><span>Vitality</span><span id="health-value">100</span></div>
       <div class="meter-track health-track" aria-label="Player health"><span id="player-health" class="meter-fill health-fill" ></span></div>
       <div class="secondary-meters">
@@ -79,6 +79,7 @@
       <div><span>Light strike</span><kbd>J / LMB</kbd></div>
       <div><span>Heavy strike</span><kbd>K / RMB LOCKED</kbd></div>
       <div><span>Guard / deflect</span><kbd>F</kbd></div>
+      <div><span>Sprint</span><kbd>HOLD SHIFT</kbd></div>
       <div><span>Evade</span><kbd>SPACE</kbd></div>
       <div><span>Hybrid technique</span><kbd>E</kbd></div>
       <div><span>Lock on / free camera</span><kbd>TAB</kbd></div>
@@ -100,8 +101,8 @@
           </div>
         </fieldset>
         <button class="primary-button" type="button" data-start><span>Enter the courtyard</span></button>
-        <p class="start-controls desktop-only"><span><kbd>WASD / ARROWS</kbd> Move</span><span><kbd>J / K</kbd> Strike</span><span><kbd>F</kbd> Guard</span><span><kbd>SPACE</kbd> Evade</span><span><kbd>1 / 2 / 3</kbd> Style</span><span><kbd>TAB</kbd> Lock on</span><span><kbd>RMB DRAG</kbd> Look when unlocked</span><span><kbd>ESC / P</kbd> Pause</span></p>
-        <p class="start-controls mobile-only">Use the target button to unlock the camera, then drag the scene to look. Touch combat controls appear when you enter.</p>
+        <p class="start-controls desktop-only"><span><kbd>WASD / ARROWS</kbd> Move</span><span><kbd>SHIFT</kbd> Sprint</span><span><kbd>J / K</kbd> Strike</span><span><kbd>F</kbd> Guard</span><span><kbd>SPACE</kbd> Evade</span><span><kbd>1 / 2 / 3</kbd> Style</span><span><kbd>TAB</kbd> Lock on</span><span><kbd>RMB DRAG</kbd> Look when unlocked</span><span><kbd>ESC / P</kbd> Pause</span></p>
+        <p class="start-controls mobile-only">Tap Sprint, then move the stick. Lift your thumb to stop. Tap the target to unlock the camera and drag to look.</p>
       </div>
     </section>
 
@@ -126,6 +127,7 @@
     </section>
 
     <div class="touch-controls combat-hud mobile-only" aria-label="Touch combat controls">
+      <button type="button" id="sprint-toggle" aria-pressed="false">Sprint</button>
       <div id="joystick" class="joystick" role="group" aria-label="Movement joystick"><div class="joystick-ring" aria-hidden="true"></div><div id="joystick-nub" class="joystick-nub" aria-hidden="true"></div><span>MOVE</span></div>
       <div class="touch-actions">
         <button type="button" class="touch-action touch-hybrid" data-action="hybrid" aria-label="Hybrid technique">Hybrid</button>

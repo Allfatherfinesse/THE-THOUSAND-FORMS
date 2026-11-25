@@ -353,3 +353,17 @@ h1 em { color: #dfbd79; font-weight: 400; text-shadow: 0 1px #f6dca8, 0 3px #5b4
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
 }
+
+#sprint-toggle {
+  position: absolute; left: max(31px, env(safe-area-inset-left)); bottom: max(145px, calc(env(safe-area-inset-bottom) + 119px));
+  min-width: 80px; min-height: 40px; border: 1px solid #b9a78380; border-radius: 20px;
+  background: #211b21d9; color: #efdfc4; font: inherit; font-size: 11px; letter-spacing: .06em;
+  pointer-events: auto; touch-action: manipulation; user-select: none;
+}
+#sprint-toggle[aria-pressed="true"] { color: #211a16; background: #d6b174; border-color: #f6d99e; }
+@media (max-height: 650px) and (orientation: portrait) {
+  .style-panel { bottom: 188px; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  #sprint-toggle { left: max(126px, calc(env(safe-area-inset-left) + 112px)); bottom: max(25px, env(safe-area-inset-bottom)); }
+}

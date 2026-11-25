@@ -1,8 +1,7 @@
 import * as THREE from './vendor/three.module.js';
 
-// Original procedural architecture. All textures are drawn locally; no remote
-// image requests, licensed art packs, or per-frame material allocations.
-export function buildSanctuary({ scene, geometry, material, basic, mesh, terrainMaterials = [] }) {
+// Original courtyard geometry and materials. The bundled panorama provides sky light.
+export function buildSanctuary({ scene, horizonUrl, reflectSky, geometry, material, basic, mesh, terrainMaterials = [] }) {
   const TAU = Math.PI * 2;
   let seed = 80631;
   const random = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
@@ -62,33 +61,87 @@ export function buildSanctuary({ scene, geometry, material, basic, mesh, terrain
       ctx.fillRect(random() * size, random() * size, 1, 1);
     }
   }, false);
-  const floorMap = canvasTexture(256, (ctx, size) => {
-    ctx.fillStyle = '#c2c0b7'; ctx.fillRect(0, 0, size, size);
-    for (let i = 0; i < 6500; i++) {
-      const light = 85 + Math.floor(random() * 150);
-      ctx.fillStyle = `rgba(${light},${light},${light},${.06 + random() * .13})`;
-      ctx.fillRect(random() * size, random() * size, 1 + random() * 4, 1 + random() * 2);
+  // Correlated albedo, surface relief and roughness keep damp patches physically
+  // consistent: darker stone, flatter microstructure and a sharper reflection.
+  const surfaceSize = 512;
+  const surfaceHeight = new Float32Array(surfaceSize * surfaceSize);
+  const surfaceAlbedo = new Uint8Array(surfaceSize * surfaceSize * 4);
+  const surfaceRoughness = new Uint8Array(surfaceSize * surfaceSize * 4);
+  const noiseGrids = [3, 9, 27, 81].map(frequency => ({ frequency, data: Float32Array.from({ length: frequency * frequency }, random) }));
+  const smooth = value => value * value * (3 - 2 * value);
+  function noise(u, v, octave) {
+    const { frequency, data } = noiseGrids[octave];
+    const x = u * frequency, y = v * frequency;
+    const ix = Math.floor(x), iy = Math.floor(y), fx = smooth(x - ix), fy = smooth(y - iy);
+    const at = (xx, yy) => data[((yy + frequency) % frequency) * frequency + ((xx + frequency) % frequency)];
+    const top = at(ix, iy) * (1 - fx) + at(ix + 1, iy) * fx;
+    const bottom = at(ix, iy + 1) * (1 - fx) + at(ix + 1, iy + 1) * fx;
+    return top * (1 - fy) + bottom * fy;
+  }
+  function dataTexture(data, color = false) {
+    const texture = new THREE.DataTexture(data, surfaceSize, surfaceSize, THREE.RGBAFormat);
+    texture.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.magFilter = THREE.LinearFilter; texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true; texture.anisotropy = 4; texture.needsUpdate = true;
+    texture.repeat.set(.45, .45); textures.push(texture);
+    return texture;
+  }
+  function normalMap(height, strength = 8) {
+    const data = new Uint8Array(surfaceSize * surfaceSize * 4);
+    const sample = (x, y) => height[((y + surfaceSize) % surfaceSize) * surfaceSize + ((x + surfaceSize) % surfaceSize)];
+    for (let y = 0; y < surfaceSize; y++) for (let x = 0; x < surfaceSize; x++) {
+      const dx = (sample(x - 1, y) - sample(x + 1, y)) * strength;
+      const dy = (sample(x, y - 1) - sample(x, y + 1)) * strength;
+      const length = Math.hypot(dx, dy, 1), index = (y * surfaceSize + x) * 4;
+      data[index] = (dx / length * .5 + .5) * 255;
+      data[index + 1] = (dy / length * .5 + .5) * 255;
+      data[index + 2] = (1 / length * .5 + .5) * 255; data[index + 3] = 255;
     }
-    for (let i = 0; i < 14; i++) {
-      const x = random() * size, y = random() * size;
-      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + random() * 20, y + random() * 25);
-      ctx.strokeStyle = 'rgba(45,48,46,.17)'; ctx.lineWidth = .6; ctx.stroke();
-    }
-  });
+    return dataTexture(data);
+  }
+  for (let y = 0; y < surfaceSize; y++) for (let x = 0; x < surfaceSize; x++) {
+    const u = x / surfaceSize, v = y / surfaceSize;
+    const broad = noise(u, v, 0), medium = noise(u, v, 1), grain = noise(u, v, 2), grit = noise(u, v, 3);
+    const damp = smooth(Math.max(0, Math.min(1, (broad * .65 + medium * .35 - .40) / .25)));
+    const vein = Math.pow(Math.max(0, Math.sin((u * 5 + v * 2 + medium * .32) * TAU)), 20);
+    const gritHeight = (grit - .5) * .028 + (grain - .5) * .07;
+    surfaceHeight[y * surfaceSize + x] = .5 + (medium - .5) * .18 + gritHeight * (1 - damp * .72) - vein * .019;
+    const base = (179 + broad * 40 + (grain - .5) * 31 + (grit - .5) * 18 - vein * 14) * (1 - damp * .34);
+    const index = (y * surfaceSize + x) * 4;
+    surfaceAlbedo[index] = base * .985; surfaceAlbedo[index + 1] = base; surfaceAlbedo[index + 2] = base * .985;
+    surfaceAlbedo[index + 3] = 255;
+    const roughness = 221 - damp * 166 + (grain - .5) * 14;
+    surfaceRoughness[index] = surfaceRoughness[index + 1] = surfaceRoughness[index + 2] = roughness;
+    surfaceRoughness[index + 3] = 255;
+  }
+  const floorMap = dataTexture(surfaceAlbedo, true);
+  const floorNormal = normalMap(surfaceHeight, 10);
+  const floorRoughness = dataTexture(surfaceRoughness);
   for (const mat of terrainMaterials) {
-    mat.map = floorMap; mat.bumpMap = floorMap; mat.bumpScale = .022;
-    mat.roughness = .94; mat.needsUpdate = true;
+    mat.map = floorMap; mat.normalMap = floorNormal; mat.normalScale.set(.72, .72);
+    mat.bumpMap = null; mat.roughnessMap = floorRoughness; mat.roughness = .88;
+    mat.metalness = .025; mat.envMapIntensity = .5; mat.needsUpdate = true;
   }
 
-  const stone = material(0xadb0a8, { map: masonryMap, bumpMap: masonryBump, bumpScale: .065, roughness: .94, metalness: .025 });
-  const paleStone = material(0xc2c0b1, { map: masonryMap, bumpMap: masonryBump, bumpScale: .055, roughness: .91, metalness: .025 });
-  const darkStone = material(0x859194, { map: masonryMap, bumpMap: masonryBump, bumpScale: .05, roughness: .96, metalness: .015 });
+  const wallHeight = new Float32Array(surfaceSize * surfaceSize);
+  const wallPixels = masonryBump.image.getContext('2d').getImageData(0, 0, surfaceSize, surfaceSize).data;
+  for (let y = 0; y < surfaceSize; y++) for (let x = 0; x < surfaceSize; x++) {
+    wallHeight[y * surfaceSize + x] = wallPixels[((surfaceSize - 1 - y) * surfaceSize + x) * 4] / 255;
+  }
+  const wallNormal = normalMap(wallHeight, 2.5); wallNormal.repeat.set(1, 1);
+
+  const stone = material(0xadb0a8, { map: masonryMap, normalMap: wallNormal, normalScale: new THREE.Vector2(.55, .55), roughness: .88, metalness: .025 });
+  const paleStone = material(0xc2c0b1, { map: masonryMap, normalMap: wallNormal, normalScale: new THREE.Vector2(.45, .45), roughness: .83, metalness: .025 });
+  const darkStone = material(0x859194, { map: masonryMap, normalMap: wallNormal, normalScale: new THREE.Vector2(.55, .55), roughness: .9, metalness: .015 });
   const deepStone = material(0x74838d, { map: masonryMap, roughness: 1, metalness: 0 });
   const distantStone = material(0x536d83, { roughness: 1, metalness: 0 });
   const bronze = material(0xb49c67, { roughness: .62, metalness: .5 });
   const black = material(0x14232c, { roughness: 1, metalness: 0 });
   const warmGlass = basic(0xd6a667, { fog: true, transparent: true, opacity: .73 });
   const coolGlass = basic(0x779baa, { fog: true, transparent: true, opacity: .46 });
+  const archMaterials = new Map();
+  const archJoints = [];
   stone.addEventListener('dispose', () => textures.forEach(texture => texture.dispose()));
   const box = geometry('sanctuary:box', () => new THREE.BoxGeometry(1, 1, 1));
   const octagon = geometry('sanctuary:octagon', () => new THREE.CylinderGeometry(1, 1, 1, 8));
@@ -152,8 +205,31 @@ export function buildSanctuary({ scene, geometry, material, basic, mesh, terrain
   const skyTexture = new THREE.CanvasTexture(skyCanvas);
   skyTexture.colorSpace = THREE.SRGBColorSpace;
   skyTexture.mapping = THREE.EquirectangularReflectionMapping;
-  textures.push(skyTexture);
+  const releaseFallback = () => skyTexture.dispose();
+  stone.addEventListener('dispose', releaseFallback);
   scene.background = skyTexture;
+  let disposed = false, skyReady = false;
+  stone.addEventListener('dispose', () => { disposed = true; });
+  new THREE.TextureLoader().load(horizonUrl, sky => {
+    if (disposed) { sky.dispose(); return; }
+    sky.colorSpace = THREE.SRGBColorSpace;
+    sky.mapping = THREE.EquirectangularReflectionMapping;
+    textures.push(sky);
+    scene.background = sky;
+    stone.removeEventListener('dispose', releaseFallback);
+    releaseFallback();
+    scene.backgroundIntensity = .86;
+    // Broad reflections only need the low spatial frequencies of the sky.
+    const lightCanvas = document.createElement('canvas');
+    lightCanvas.width = 256; lightCanvas.height = 128;
+    lightCanvas.getContext('2d').drawImage(sky.image, 0, 0, 256, 128);
+    const lightMap = new THREE.CanvasTexture(lightCanvas);
+    lightMap.colorSpace = THREE.SRGBColorSpace;
+    lightMap.mapping = THREE.EquirectangularReflectionMapping;
+    textures.push(lightMap);
+    reflectSky(lightMap);
+    skyReady = true;
+  }, undefined, () => { skyReady = true; });
 
   function pointedPoint(u, halfWidth, spring, rise) {
     const alpha = (1 - Math.abs(u)) * Math.PI / 3;
@@ -194,8 +270,17 @@ export function buildSanctuary({ scene, geometry, material, basic, mesh, terrain
   }
   function arch(parent, width, spring, rise, thickness, depth, mat, start = -1, end = 1, z = 0) {
     const geo = archGeometry(width, spring, rise, thickness, depth, start, end);
-    const item = mesh(parent, geo, mat, [0, 0, z]);
+    let archMaterial = mat;
+    if (mat !== bronze && mat !== distantStone) {
+      if (!archMaterials.has(mat)) archMaterials.set(mat, material(mat.color.clone().multiplyScalar(.72), {
+        map: floorMap, normalMap: floorNormal, normalScale: new THREE.Vector2(.55, .55),
+        roughnessMap: floorRoughness, roughness: .96, metalness: .015,
+      }));
+      archMaterial = archMaterials.get(mat);
+    }
+    const item = mesh(parent, geo, archMaterial, [0, 0, z]);
     item.userData.cameraCollisionBoxes = geo.userData.cameraBoxes;
+    if (thickness > .12 && mat !== distantStone) archJoints.push({ item, width, spring, rise, thickness, depth, start, end });
     return item;
   }
   function column(parent, x, z, height, radius = .34, damaged = false) {
@@ -453,5 +538,26 @@ export function buildSanctuary({ scene, geometry, material, basic, mesh, terrain
   mesh(moonHalo, markGeometry, haloMat, [0, 0, 0], [1, 1, 1], false);
   moonHalo.traverse(item => { item.userData.noStaticBatch = true; item.userData.noCameraCollision = true; });
   scene.add(moonHalo);
-  return { moonHalo };
+
+  // Radial voussoir joints replace the implausible horizontal brick grid on
+  // curved arches. All shallow joints share one lightweight draw call.
+  scene.updateMatrixWorld(true);
+  const jointPositions = [];
+  for (const joint of archJoints) {
+    const count = Math.max(4, Math.ceil((joint.end - joint.start) * 7));
+    for (let i = 1; i < count; i++) {
+      const u = joint.start + (joint.end - joint.start) * i / count;
+      if (Math.abs(u) < .035) continue;
+      const a = pointedPoint(u, joint.width, joint.spring, joint.rise);
+      const b = pointedPoint(u, joint.width + joint.thickness, joint.spring, joint.rise + joint.thickness);
+      const length = a.distanceTo(b);
+      const dx = -(b.y - a.y) / length * .006, dy = (b.x - a.x) / length * .006;
+      const points = [[a.x + dx, a.y + dy], [a.x - dx, a.y - dy], [b.x + dx, b.y + dy], [b.x - dx, b.y - dy]]
+        .map(([x, y]) => new THREE.Vector3(x, y, joint.depth / 2 + .032).applyMatrix4(joint.item.matrixWorld));
+      for (const index of [0, 1, 2, 1, 3, 2]) jointPositions.push(points[index].x, points[index].y, points[index].z);
+    }
+  }
+  const jointGeometry = geometry('sanctuary:radial-joints', () => new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(jointPositions, 3)));
+  decoration(mesh(scene, jointGeometry, basic(0x313a36, { transparent: true, opacity: .58, depthWrite: false, side: THREE.DoubleSide }), [0, 0, 0], [1, 1, 1], false));
+  return { moonHalo, skyReady: () => skyReady };
 }

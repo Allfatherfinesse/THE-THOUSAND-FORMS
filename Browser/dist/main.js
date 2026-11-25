@@ -1,5 +1,6 @@
 import { Game, STYLES } from './combat.js';
 import { createRenderer } from './renderer.js';
+import horizonUrl from './art/storm-horizon.jpg';
 import { createAudio } from './audio.js';
 import { createAppShell } from './app-shell.js';
 
@@ -9,7 +10,7 @@ const game = new Game('sparring');
 const sound = createAudio();
 let renderer;
 try {
-  renderer = createRenderer(canvas);
+  renderer = createRenderer(canvas, horizonUrl);
 } catch (error) {
   const message = document.createElement('div');
   message.className = 'browser-error';
@@ -22,7 +23,17 @@ let started = false, paused = false, selectedMode = 'sparring', selectedStyle = 
 let muted = false, locked = true, lastFrame = performance.now(), elapsed = 0;
 let cameraLookPointer = null, messageUntil = 0, resultShown = false, hitstop = 0;
 let lastStyle = -1, lastIntent = '', joystickPointer = null;
-let touchGuard = null;
+let touchGuard = null, touchSprintArmed = false;
+const sprintToggle = $('sprint-toggle');
+function armTouchSprint(value) {
+  touchSprintArmed = value;
+  sprintToggle.setAttribute('aria-pressed', String(value));
+}
+sprintToggle.addEventListener('click', () => {
+  if (!started || paused || game.result !== 'playing') return;
+  armTouchSprint(!touchSprintArmed);
+  canvas.focus({ preventScroll: true });
+});
 const keys = new Set(), joystick = { x: 0, z: 0 };
 const stats = { hits: 0, deflects: 0, start: 0 };
 
@@ -35,6 +46,8 @@ function showMessage(text, seconds = 1.4) {
 
 function resetInput() {
   keys.clear(); joystick.x = 0; joystick.z = 0;
+  armTouchSprint(false);
+  game.setInput({ x: 0, z: 0, sprint: false });
   game.setGuard(false);
   game.player.buffer = null;
   const look = cameraLookPointer;
@@ -181,7 +194,7 @@ window.addEventListener('keydown', (event) => {
   }
   if (paused || game.result !== 'playing') return;
   if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, [contenteditable="true"]')) return;
-  const recognized = ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowLeft','ArrowDown','ArrowRight','Space','KeyF','KeyJ','KeyK','KeyQ','KeyE','KeyR','Digit1','Digit2','Digit3','Tab'];
+  const recognized = ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowLeft','ArrowDown','ArrowRight','ShiftLeft','ShiftRight','Space','KeyF','KeyJ','KeyK','KeyQ','KeyE','KeyR','Digit1','Digit2','Digit3','Tab'];
   if (!recognized.includes(event.code)) return;
   event.preventDefault(); keys.add(event.code);
   if (event.repeat) return;
@@ -258,10 +271,11 @@ joystickElement?.addEventListener('pointerdown', event => {
 joystickElement?.addEventListener('pointermove', event => { if (event.pointerId === joystickPointer) moveJoystick(event); });
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) joystickElement?.addEventListener(name, event => {
   if (joystickPointer !== event.pointerId) return;
+  armTouchSprint(false);
   joystick.x = joystick.z = 0; joystickPointer = null; $('joystick-nub').style.transform = 'translate(-50%, -50%)';
 });
 
-const hudIds = ['player-health','player-stamina','player-posture','enemy-health','enemy-posture','health-value','stamina-value','enemy-name'];
+const hudIds = ['player-health','player-stamina','player-posture','enemy-health','enemy-posture','health-value','stamina-value','enemy-name','movement-status'];
 const hud = Object.fromEntries(hudIds.map(id => [id, $(id)]));
 const lastMeter = new Map();
 function meter(id, value, max) {
@@ -283,6 +297,7 @@ function updateHud() {
   meter('enemy-posture', enemy.posture, enemy.maxPosture);
   hudText('health-value', Math.ceil(player.health));
   hudText('stamina-value', Math.ceil(player.stamina));
+  hudText('movement-status', player.sprinting ? 'SPRINTING' : player.sprintExhausted ? 'WINDED' : 'YOU');
   hudText('enemy-name', game.mode === 'boss' ? 'THE FRACTURED MASTER' : 'THE SILENT DISCIPLE');
   let intent = enemy.state === 'windup' ? `${enemy.attack?.name || 'Attack'} · Incoming` :
     enemy.state === 'broken' ? 'Posture broken · Strike now' : enemy.state === 'recovery' ? 'An opening' :
@@ -303,10 +318,10 @@ function updateHud() {
 const lastStep = { player: 0, enemy: 0 };
 function playFootsteps() {
   for (const fighter of [game.player, game.enemy]) {
-    const beat = Math.floor(fighter.movePhase / Math.PI);
+    const beat = renderer.footstepBeat(fighter.id);
     if (Number.isFinite(beat) && beat !== lastStep[fighter.id]) {
       lastStep[fighter.id] = beat;
-      if (fighter.speed > .18) sound.step(fighter.id === 'player' ? .85 : .46);
+      if (fighter.speed > .18) sound.step(fighter.id === 'player' ? .85 : .46, fighter.sprintBlend || 0, beat % 2);
     }
   }
 }
@@ -346,7 +361,7 @@ function readCombatInput() {
   const length = Math.hypot(x, z); if (length > 1) { x /= length; z /= length; }
   const aim = locked ? { x: game.enemy.x - game.player.x, z: game.enemy.z - game.player.z }
     : length > .01 ? { x, z } : { x: Math.sin(game.player.yaw), z: Math.cos(game.player.yaw) };
-  return { x, z, aimX: aim.x, aimZ: aim.z };
+  return { x, z, aimX: aim.x, aimZ: aim.z, sprint: keys.has('ShiftLeft') || keys.has('ShiftRight') || (touchSprintArmed && joystickPointer !== null) };
 }
 
 function frame(now) {
@@ -359,12 +374,12 @@ function frame(now) {
     const freeze = Math.min(dt, hitstop);
     hitstop -= freeze;
     game.update(dt - freeze, readCombatInput());
-    playFootsteps();
     processEvents(); updateHud();
     if (game.result !== 'playing' && !resultShown) showResult();
   }
   if (messageUntil && elapsed > messageUntil) { $('combat-message').classList.remove('visible'); messageUntil = 0; }
   renderer?.render(game, paused ? 0 : dt, elapsed, locked);
+  if (started && !paused && game.result === 'playing') playFootsteps();
   requestAnimationFrame(frame);
 }
 window.addEventListener('resize', resizeGame);
@@ -381,6 +396,6 @@ requestAnimationFrame(frame);
 Object.defineProperty(window, '__THOUSAND_FORMS__', { value: {
   snapshot: () => ({ started, paused, locked, renderStats: renderer?.stats(), camera: renderer?.cameraSnapshot(game), cameraLookPointer: cameraLookPointer?.id ?? null,
     fullscreen: appShell.active(), keys: [...keys], joystick: { ...joystick },
-    joystickPointer, touchGuard: touchGuard?.id ?? null, mode: game.mode, result: game.result, phase: game.phase,
+    joystickPointer, touchSprintArmed, touchGuard: touchGuard?.id ?? null, mode: game.mode, result: game.result, phase: game.phase,
     player: { ...game.player }, enemy: { ...game.enemy }, time: game.time }),
 }, writable: false });

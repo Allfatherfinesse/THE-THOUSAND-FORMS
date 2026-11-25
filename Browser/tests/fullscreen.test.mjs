@@ -30,7 +30,8 @@ async function openPage(options) {
   });
   const response = await page.goto(baseURL, { waitUntil: 'networkidle' });
   assert.equal(response.status(), 200);
-  await wait(page, () => Boolean(window.__THOUSAND_FORMS__));
+  await page.waitForFunction(() => Boolean(window.__THOUSAND_FORMS__?.snapshot().renderStats?.calls), null,
+    { polling: 100, timeout: 60000 });
   assert.equal(await page.locator('.browser-error').count(), 0, 'WebGL scene must initialize');
   return page;
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-25 — Sprint and courtyard realism
+
+- Hold either Shift key to sprint with camera-relative movement, or tap Sprint and drag the touch stick. A full sprint reaches 1.6× walking speed. Travel drains stamina and a winded fighter recovers before sprinting again.
+- Both fighters now move between simulation ticks. Sprint builds through the gait and camera, with stronger footfalls at speed. Attacking, guarding and evading interrupt the run.
+- Added a storm panorama and reflected sky light, damp beveled flagstones, carved arch joints, torn heraldic standards and glowing braziers. Reshaped the fighters and added material detail to their armor and clothing.
+
 ## 2026-11-25 — The ruined sanctuary
 
 - Rebuilt the Ashen Courtyard as a ruined Gothic sanctuary with an eclipsed sky, pointed arches, carved masonry, and an engraved fighting floor. The Seeker and the Master now wear layered cloth and tarnished armor.

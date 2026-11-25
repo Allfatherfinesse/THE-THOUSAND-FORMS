@@ -59,7 +59,11 @@ export function createAudio() {
       enabled = value;
       if (master) master.gain.setTargetAtTime(value ? .36 : 0, context.currentTime, .025);
     },
-    step(gain) { noise(.085, gain * .15, 1200, 350); tone(82, 45, .085, gain * .07); },
+    step(gain, effort = 0, alternate = 0) {
+      const pitch = alternate ? 1.07 : .96;
+      noise(.082 + effort * .028, gain * (.15 + .10 * effort), (1300 + effort * 270) * pitch, 370);
+      tone((85 + effort * 12) * pitch, 45, .09 + effort * .024, gain * (.075 + effort * .08));
+    },
     event(e) {
       const heavy = e.kind === 'heavy' || e.kind === 'hybrid' || e.damage >= 20;
       const pitch = e.actor === 'enemy' ? .84 : 1;

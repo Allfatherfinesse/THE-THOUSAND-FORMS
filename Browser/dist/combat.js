@@ -52,8 +52,52 @@ function makeFighter(id, x, z, health, posture, style) {
     staminaDelay: 0, postureDelay: 0, buffer: null, attackSequence: 0,
     hitTargets: new Set(), dodgeX: 0, dodgeZ: 0, pendingStyle: style,
     vx: 0, vz: 0, speed: 0, movePhase: 0, weightShift: 0, comboIndex: 0, footwork: 'idle',
+    sprinting: false, sprintBlend: 0, sprintExhausted: false,
     _motorX: 0, _motorZ: 0, _driveProgress: 0, _comboUntil: 0,
   };
+}
+
+function makeRenderTrack(fighter) {
+  return {
+    source: fighter,
+    // Combat state and clocks remain live; only world transforms are sampled.
+    view: Object.assign(Object.create(fighter), { x: fighter.x, z: fighter.z, yaw: fighter.yaw }),
+    previousX: fighter.x, previousZ: fighter.z, previousYaw: fighter.yaw,
+    currentX: fighter.x, currentZ: fighter.z, currentYaw: fighter.yaw,
+  };
+}
+
+function syncRenderTrack(track, fighter) {
+  if (track.source !== fighter) return makeRenderTrack(fighter);
+  if (fighter.x !== track.currentX || fighter.z !== track.currentZ || fighter.yaw !== track.currentYaw) {
+    // Tools and camera tests may place actors directly. A teleport is a new
+    // sampling origin, never a sweep from the previous arena position.
+    track.previousX = track.currentX = fighter.x;
+    track.previousZ = track.currentZ = fighter.z;
+    track.previousYaw = track.currentYaw = fighter.yaw;
+  }
+  return track;
+}
+
+function beginRenderStep(track) {
+  track.previousX = track.currentX;
+  track.previousZ = track.currentZ;
+  track.previousYaw = track.currentYaw;
+}
+
+function endRenderStep(track, dt) {
+  const fighter = track.source;
+  track.currentX = fighter.x; track.currentZ = fighter.z; track.currentYaw = fighter.yaw;
+  fighter.vx = (fighter.x - track.previousX) / dt;
+  fighter.vz = (fighter.z - track.previousZ) / dt;
+  fighter.speed = Math.hypot(fighter.vx, fighter.vz);
+}
+
+function sampleRenderTrack(track, alpha) {
+  track.view.x = track.previousX + (track.currentX - track.previousX) * alpha;
+  track.view.z = track.previousZ + (track.currentZ - track.previousZ) * alpha;
+  track.view.yaw = track.previousYaw + angleDelta(track.currentYaw, track.previousYaw) * alpha;
+  return track.view;
 }
 
 export class Game {
@@ -73,11 +117,29 @@ export class Game {
     this._accumulator = 0;
     this._aiCooldown = 1.0;
     this._aiStep = 0;
-    this._input = { x: 0, z: 0 };
+    this._input = { x: 0, z: 0, sprint: false };
+    this._playerRender = makeRenderTrack(this.player);
+    this._enemyRender = makeRenderTrack(this.enemy);
+    this._renderState = { player: this._playerRender.view, enemy: this._enemyRender.view,
+      mode: this.mode, result: this.result, presentationPlaying: false, alpha: 0 };
     return this;
   }
 
   drainEvents() { return this.events.splice(0); }
+
+  getRenderState() {
+    this._playerRender = syncRenderTrack(this._playerRender, this.player);
+    this._enemyRender = syncRenderTrack(this._enemyRender, this.enemy);
+    const alpha = this.result === 'playing' ? clamp(this._accumulator / STEP, 0, 1) : 1;
+    const view = this._renderState;
+    view.player = sampleRenderTrack(this._playerRender, alpha);
+    view.enemy = sampleRenderTrack(this._enemyRender, alpha);
+    view.mode = this.mode;
+    view.result = this.result;
+    view.presentationPlaying = this.presentationPlaying;
+    view.alpha = alpha;
+    return view;
+  }
 
   action(name, value) {
     if (this.result !== 'playing' || this.player.state === 'dead') return false;
@@ -112,7 +174,14 @@ export class Game {
       x: Number.isFinite(input.x) ? input.x : 0, z: Number.isFinite(input.z) ? input.z : 0,
       aimX: Number.isFinite(input.aimX) ? input.aimX : undefined,
       aimZ: Number.isFinite(input.aimZ) ? input.aimZ : undefined,
+      sprint: input.sprint === true,
     };
+    // Pause/blur can release all controls without taking a simulation step.
+    // Keep motor momentum for normal braking, but clear a stale sprint pose.
+    if (!this._input.sprint && Math.hypot(this._input.x, this._input.z) < .001) {
+      this.player.sprinting = false;
+      this.player.sprintBlend = 0;
+    }
   }
 
   update(dt, input = {}) {
@@ -136,6 +205,8 @@ export class Game {
     fighter.stateDuration = duration;
     fighter.invulnerable = false;
     fighter.armored = this.mode === 'boss' && fighter.id === 'enemy' && (state === 'windup' || state === 'active');
+    if (state !== 'idle') fighter.sprinting = false;
+    if (state === 'dead') fighter.sprintBlend = 0;
     if (state === 'windup') fighter.footwork = 'plant';
     else if (state === 'active' || state === 'evade') fighter.footwork = 'attack';
     else if (state === 'recovery') fighter.footwork = 'plant';
@@ -306,26 +377,51 @@ export class Game {
 
   _movePlayer(dt) {
     const fighter = this.player;
+    if (fighter.sprintExhausted && fighter.stamina >= 20) fighter.sprintExhausted = false;
+    const length = Math.hypot(this._input.x, this._input.z);
+    const wantsSprint = this._input.sprint && length > .1 && fighter.state === 'idle'
+      && !fighter.sprintExhausted && fighter.stamina > 0;
+    const previousBlend = fighter.sprintBlend;
+    fighter.sprintBlend = clamp(previousBlend + (wantsSprint ? 6 : -8) * dt, 0, 1);
+    fighter.sprinting = false;
     if (['dead', 'stun', 'broken', 'switch'].includes(fighter.state)) { fighter.footwork = 'idle'; return; }
     if (fighter.state === 'evade') {
       const speed = 8 * (1 - .75 * smoothstep((fighter.stateTime - .22) / .22));
       this._move(fighter, fighter.dodgeX, fighter.dodgeZ, speed, dt);
       return;
     }
-    const length = Math.hypot(this._input.x, this._input.z);
     const movement = Math.min(length, 1);
     let factor = 1;
     if (fighter.state === 'guard') factor = .45;
     else if (fighter.state === 'windup') factor = .18 * (1 - smoothstep(fighter.stateTime / (fighter.stateDuration * .55)));
     else if (fighter.state === 'active') factor = 0;
     else if (fighter.state === 'recovery') factor = .65 * smoothstep((fighter.stateTime / fighter.stateDuration - .45) / .55);
-    const desiredSpeed = (fighter.style === 2 ? 4.65 : 4.3) * movement * factor;
+    // The brief coast down is locomotion momentum only. Every combat state uses
+    // its own speed immediately, regardless of the fading animation blend.
+    const sprintSpeed = fighter.state === 'idle' ? 1 + .60 * fighter.sprintBlend : 1;
+    const desiredSpeed = (fighter.style === 2 ? 4.65 : 4.3) * movement * factor * sprintSpeed;
     const targetX = length > 0 ? this._input.x / length * desiredSpeed : 0;
     const targetZ = length > 0 ? this._input.z / length * desiredSpeed : 0;
-    const braking = desiredSpeed < Math.hypot(fighter._motorX, fighter._motorZ)
-      || targetX * fighter._motorX + targetZ * fighter._motorZ < 0;
+    const reversing = targetX * fighter._motorX + targetZ * fighter._motorZ < 0;
+    const braking = desiredSpeed < Math.hypot(fighter._motorX, fighter._motorZ) || reversing;
     const gait = ready(fighter) || (fighter.state === 'recovery' && factor > .15);
-    this._steer(fighter, targetX, targetZ, attacking(fighter) ? 65 : (braking ? 55 : 42), dt, gait);
+    const acceleration = attacking(fighter) ? 65
+      : (reversing && fighter.sprintBlend > .1 ? 82 : (braking ? 55 : (wantsSprint ? 58 : 42)));
+    const previousX = fighter.x, previousZ = fighter.z;
+    this._steer(fighter, targetX, targetZ, acceleration, dt, gait);
+    const traveling = Math.hypot(fighter.x - previousX, fighter.z - previousZ) > .05 * dt;
+    if (wantsSprint && traveling) {
+      fighter.sprinting = true;
+      this._spend(fighter, 18 * dt);
+      if (fighter.stamina < 1e-6) {
+        fighter.stamina = 0;
+        fighter.sprintExhausted = true;
+        fighter.sprinting = false;
+      }
+    } else if (!traveling) {
+      // Holding sprint into a wall neither consumes stamina nor runs in place.
+      fighter.sprintBlend = Math.max(0, previousBlend - 8 * dt);
+    }
     if (gait) fighter.footwork = desiredSpeed < .05 ? 'idle'
       : (targetX * Math.sin(fighter.yaw) + targetZ * Math.cos(fighter.yaw) < -.2 ? 'retreat' : 'approach');
     if (ready(fighter) || (fighter.state === 'windup' && fighter.stateTime < fighter.stateDuration * .65)) {
@@ -457,21 +553,24 @@ export class Game {
 
   _step(dt) {
     this.time += dt;
-    const positions = [this.player, this.enemy].map(fighter => ({ x: fighter.x, z: fighter.z }));
+    this._playerRender = syncRenderTrack(this._playerRender, this.player);
+    this._enemyRender = syncRenderTrack(this._enemyRender, this.enemy);
+    beginRenderStep(this._playerRender);
+    beginRenderStep(this._enemyRender);
     this._movePlayer(dt);
     this._updateAI(dt);
     this._tickFighter(this.player, dt);
     this._tickFighter(this.enemy, dt);
-    for (const fighter of [this.player, this.enemy]) this._driveAttack(fighter);
+    this._driveAttack(this.player);
+    this._driveAttack(this.enemy);
     this._separate();
     // Snapshot both active attacks before applying either hit, allowing fair trades.
-    const hits = [this._hitCandidate(this.player, this.enemy), this._hitCandidate(this.enemy, this.player)];
-    for (const hit of hits) if (hit) this._receive(hit);
-    [this.player, this.enemy].forEach((fighter, index) => {
-      fighter.vx = (fighter.x - positions[index].x) / dt;
-      fighter.vz = (fighter.z - positions[index].z) / dt;
-      fighter.speed = Math.hypot(fighter.vx, fighter.vz);
-    });
+    const playerHit = this._hitCandidate(this.player, this.enemy);
+    const enemyHit = this._hitCandidate(this.enemy, this.player);
+    if (playerHit) this._receive(playerHit);
+    if (enemyHit) this._receive(enemyHit);
+    endRenderStep(this._playerRender, dt);
+    endRenderStep(this._enemyRender, dt);
     if (this.player.health <= 0 || this.enemy.health <= 0) {
       this.result = this.player.health <= 0 ? 'lost' : 'won';
       this._event(this.result === 'won' ? 'win' : 'lose', this.player);
